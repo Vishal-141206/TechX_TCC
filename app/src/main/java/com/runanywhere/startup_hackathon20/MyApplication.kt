@@ -8,10 +8,12 @@ import com.runanywhere.sdk.data.models.SDKEnvironment
 import com.runanywhere.sdk.public.extensions.addModelFromURL
 import com.runanywhere.sdk.llm.llamacpp.LlamaCppServiceProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 class MyApplication : Application() {
 
+    @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
 
@@ -39,6 +41,7 @@ class MyApplication : Application() {
 
             // Step 3: Register Models
             // Offload network/disk operations to IO
+            @OptIn(DelicateCoroutinesApi::class)
             GlobalScope.launch(Dispatchers.IO) {
                 registerModels()
                 // Step 4: Scan for previously downloaded models

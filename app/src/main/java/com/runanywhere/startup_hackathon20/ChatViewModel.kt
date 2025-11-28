@@ -1,23 +1,20 @@
 package com.runanywhere.startup_hackathon20
 
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-
-// From SmsReader.kt
-import com.runanywhere.startup_hackathon20.RawSms
-import com.runanywhere.startup_hackathon20.readSmsInbox
-
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.runanywhere.sdk.models.ModelInfo
 import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.public.extensions.listAvailableModels
-import com.runanywhere.sdk.models.ModelInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.regex.Pattern
 
-// Simple Message Data Class
+// Simple Message Data Class for the Chat Interface
 data class ChatMessage(
     val text: String,
     val isUser: Boolean
@@ -26,12 +23,14 @@ data class ChatMessage(
 // ViewModel
 class ChatViewModel : ViewModel() {
 
+    // --- Chat State ---
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
+    // --- Model Management State ---
     private val _availableModels = MutableStateFlow<List<ModelInfo>>(emptyList())
     val availableModels: StateFlow<List<ModelInfo>> = _availableModels
 
@@ -41,12 +40,36 @@ class ChatViewModel : ViewModel() {
     private val _currentModelId = MutableStateFlow<String?>(null)
     val currentModelId: StateFlow<String?> = _currentModelId
 
-    private val _statusMessage = MutableStateFlow<String>("Initializing...")
+    private val _statusMessage = MutableStateFlow("Initializing...")
     val statusMessage: StateFlow<String> = _statusMessage
+
+    // --- SMS Data State ---
+    private val _smsList = MutableStateFlow<List<RawSms>>(emptyList())
+    val smsList: StateFlow<List<RawSms>> = _smsList
+
+    private val _isImportingSms = MutableStateFlow(false)
+    val isImportingSms: StateFlow<Boolean> = _isImportingSms
+
+    // Stores the RAW JSON string extracted from the SMS
+    private val _parsedJsonBySms = MutableStateFlow<Map<String, String>>(emptyMap())
+    val parsedJsonBySms: StateFlow<Map<String, String>> = _parsedJsonBySms
+
+    // Stores Scam Status: "safe", "likely_scam", "uncertain"
+    private val _scamResultBySms = MutableStateFlow<Map<String, String>>(emptyMap())
+    val scamResultBySms: StateFlow<Map<String, String>> = _scamResultBySms
+
+    // Progress for Batch Processing (0 to 100)
+    private val _processingProgress = MutableStateFlow(0)
+    @Suppress("unused")
+    val processingProgress: StateFlow<Int> = _processingProgress
 
     init {
         loadAvailableModels()
     }
+
+    // ============================================================================================
+    // SECTION 1: MODEL MANAGEMENT (RunAnywhere SDK)
+    // ============================================================================================
 
     private fun loadAvailableModels() {
         viewModelScope.launch {
@@ -84,10 +107,10 @@ class ChatViewModel : ViewModel() {
                 val startTime = System.currentTimeMillis()
                 val success = RunAnywhere.loadModel(modelId)
                 val duration = System.currentTimeMillis() - startTime
-                
+
                 if (success) {
                     _currentModelId.value = modelId
-                    _statusMessage.value = "Model loaded in ${duration / 1000.0}s! Ready to chat."
+                    _statusMessage.value = "Model loaded in ${duration / 1000.0}s! Ready."
                 } else {
                     _statusMessage.value = "Failed to load model"
                 }
@@ -97,25 +120,28 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    fun refreshModels() {
+        loadAvailableModels()
+    }
+
+    // ============================================================================================
+    // SECTION 2: CHAT INTERFACE
+    // ============================================================================================
+
     fun sendMessage(text: String) {
         if (_currentModelId.value == null) {
             _statusMessage.value = "Please load a model first"
             return
         }
 
-        // Add user message
         _messages.value += ChatMessage(text, isUser = true)
 
         viewModelScope.launch {
             _isLoading.value = true
-
             try {
-                // Generate response with streaming
                 var assistantResponse = ""
                 RunAnywhere.generateStream(text).collect { token ->
                     assistantResponse += token
-
-                    // Update assistant message in real-time
                     val currentMessages = _messages.value.toMutableList()
                     if (currentMessages.lastOrNull()?.isUser == false) {
                         currentMessages[currentMessages.lastIndex] =
@@ -128,121 +154,287 @@ class ChatViewModel : ViewModel() {
             } catch (e: Exception) {
                 _messages.value += ChatMessage("Error: ${e.message}", isUser = false)
             }
-
             _isLoading.value = false
         }
     }
 
-    fun refreshModels() {
-        loadAvailableModels()
-    }
-
-    // ---------------- SMS IMPORT STATE ----------------
-
-    private val _smsList = MutableStateFlow<List<RawSms>>(emptyList())
-    val smsList: StateFlow<List<RawSms>> = _smsList
-
-    private val _isImportingSms = MutableStateFlow(false)
-    val isImportingSms: StateFlow<Boolean> = _isImportingSms
+    // ============================================================================================
+    // SECTION 3: SMS IMPORT & BATCH PROCESSING
+    // ============================================================================================
 
     fun importSms(context: Context) {
         viewModelScope.launch {
             _isImportingSms.value = true
+            _statusMessage.value = "Reading inbox..."
 
             val list = withContext(Dispatchers.IO) {
                 try {
-                    readSmsInbox(context)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    emptyList<RawSms>()
+                    // Uses the filtered reader we created (Business/Banks only)
+                    readSmsInbox(context, daysLookBack = 30)
+                } catch (_: Exception) {
+                    emptyList()
                 }
             }
 
             _smsList.value = list
+            _statusMessage.value = "Imported ${list.size} financial messages."
             _isImportingSms.value = false
         }
     }
 
-    // ------------ Parse & Scam state ------------
-    private val _parsedJsonBySms = MutableStateFlow<Map<String, String>>(emptyMap())
-    val parsedJsonBySms: StateFlow<Map<String, String>> = _parsedJsonBySms
+    /**
+     * FEATURE: One-Click Processing
+     * Iterates through all loaded SMS messages and parses them automatically.
+     */
+    @Suppress("unused")
+    fun processAllMessages() {
+        val allMessages = _smsList.value
+        if (allMessages.isEmpty()) {
+            _statusMessage.value = "No messages to process."
+            return
+        }
 
-    private val _scamResultBySms = MutableStateFlow<Map<String, String>>(emptyMap()) // values: "safe", "likely_scam", "uncertain", or error
-    val scamResultBySms: StateFlow<Map<String, String>> = _scamResultBySms
+        viewModelScope.launch {
+            _statusMessage.value = "Batch processing ${allMessages.size} messages..."
+            var doneCount = 0
+            _processingProgress.value = 0
 
-    // --- Simple few-shot prompts (you can tweak these) ---
+            // Process strictly sequentially to prevent OOM on mobile devices
+            for (sms in allMessages) {
+                // 1. Check if already parsed to save time
+                if (!_parsedJsonBySms.value.containsKey(sms.id)) {
+                    // This calls the AI or Heuristic
+                    internalParseSms(sms.id, sms.body ?: "")
+                }
+
+                // 2. (Optional) Simple triggers for Scam Check to save battery
+                // If it mentions OTP, Login, or Link, check it for scams
+                if (shouldCheckForScam(sms.body)) {
+                    internalDetectScam(sms.id, sms.body ?: "")
+                }
+
+                doneCount++
+                _processingProgress.value = (doneCount * 100) / allMessages.size
+            }
+
+            _statusMessage.value = "Batch Processing Complete."
+            _processingProgress.value = 0 // Reset
+        }
+    }
+
+    private fun shouldCheckForScam(body: String?): Boolean {
+        if (body == null) return false
+        val lower = body.lowercase()
+        return lower.contains("otp") || lower.contains("http") || lower.contains("click") || lower.contains("call")
+    }
+
+    // ============================================================================================
+    // SECTION 4: AI PARSING & STRUCTURED OUTPUT
+    // ============================================================================================
+
     private val extractionPromptTemplate = """
-You are a JSON extractor. Input: a bank/SMS message. Output: ONLY a JSON object with keys:
-amount (number, in rupees), currency (INR), merchant (string or null), type ("debit" or "credit" or "info"), date (YYYY-MM-DD or null), account_tail (string or null), balance (number or null), raw_text (original message).
+You are a strict JSON extractor. Input: a single bank/payment SMS in English. Output: ONLY a single JSON object between BEGIN_JSON and END_JSON tags. The JSON must have keys:
+amount (number or null), currency ("INR"), merchant (string or null), type ("debit"|"credit"|"info"), date (YYYY-MM-DD or null), account_tail (string or null), balance (number or null), raw_text (original message).
 
-Return valid JSON only. Examples:
+Return valid JSON ONLY. NOTHING else. Examples follow.
+Example 1:
 SMS: "HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."
-JSON: {"amount":1250, "currency":"INR", "merchant":"AMAZON PAY", "type":"debit", "date":"2025-11-26", "account_tail":null, "balance":5000, "raw_text":"HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."}
+JSON:
+BEGIN_JSON
+{"amount":1250,"currency":"INR","merchant":"AMAZON PAY","type":"debit","date":"2025-11-26","account_tail":null,"balance":5000,"raw_text":"HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."}
+END_JSON
 
-Now parse this SMS:
-""" .trimIndent()
+Example 2:
+SMS: "SBI: Credited Rs. 10,000.00 via NEFT. Ref 12345."
+JSON:
+BEGIN_JSON
+{"amount":10000,"currency":"INR","merchant":null,"type":"credit","date":null,"account_tail":null,"balance":null,"raw_text":"SBI: Credited Rs. 10,000.00 via NEFT. Ref 12345."}
+END_JSON
+
+Now parse this SMS (return ONLY one JSON between BEGIN_JSON and END_JSON):
+""".trimIndent()
+
+    // Public wrapper for UI calls
+    fun parseSms(smsId: String, smsBody: String) {
+        viewModelScope.launch {
+            internalParseSms(smsId, smsBody)
+        }
+    }
+
+    // Internal suspend function for batching
+    private suspend fun internalParseSms(smsId: String, smsBody: String) {
+        if (_currentModelId.value == null) {
+            // Fallback immediately to heuristic if no model loaded
+            val heuristic = quickHeuristicJson(smsBody)
+            _parsedJsonBySms.value += (smsId to heuristic)
+            return
+        }
+
+        // Show parsing state
+        _parsedJsonBySms.value += (smsId to "Parsing...")
+
+        try {
+            val prompt = buildString {
+                append(extractionPromptTemplate)
+                append("\n\nSMS: \"${smsBody.replace("\"", "\\\"")}\"\n")
+                append("BEGIN_JSON\n")
+                append("\n")
+                append("END_JSON\n")
+            }
+
+            var streamed = ""
+            // Timeout to prevent hanging on one message
+            val result = withTimeoutOrNull(45000L) {
+                RunAnywhere.generateStream(prompt).collect { token ->
+                    streamed += token
+                    // Optional: Update UI with streaming text?
+                    // No, too fast for batching. Just collect.
+                }
+                streamed
+            } ?: ""
+
+            var finalText = result.trim()
+
+            // Logic: Extract JSON between markers
+            val beginIdx = finalText.indexOf("BEGIN_JSON")
+            val endIdx = finalText.indexOf("END_JSON")
+
+            finalText = if (beginIdx in 0 until endIdx) {
+                finalText.substring(beginIdx + "BEGIN_JSON".length, endIdx).trim()
+            } else {
+                extractFirstJsonObject(finalText) ?: quickHeuristicJson(smsBody)
+            }
+
+            _parsedJsonBySms.value += (smsId to finalText)
+
+        } catch (_: Exception) {
+            // Fallback to Heuristic on error
+            val heuristic = quickHeuristicJson(smsBody)
+            _parsedJsonBySms.value += (smsId to heuristic)
+        }
+    }
+
+    // ============================================================================================
+    // SECTION 5: SCAM DETECTION
+    // ============================================================================================
 
     private val scamPromptTemplate = """
-You are a scam detector. Input: a financial SMS text. Output: return exactly one word: safe, likely_scam, or uncertain. Use "likely_scam" if the message requests OTP, links, asks to call a number for payments, or has suspicious phrasing. Examples:
+You are a scam detector. Input: a financial SMS text. Output: return exactly one word: safe, likely_scam, or uncertain. 
+Use "likely_scam" if the message requests OTP, links, asks to call a number for payments, or has suspicious phrasing.
+Examples:
 "Your OTP is 1234" -> likely_scam
 "HDFC: Debited Rs 1000 at Amazon" -> safe
+"URGENT: Your KYC is expired. Click here" -> likely_scam
 Now classify:
 """ .trimIndent()
 
-    // ------------- parseSms(smsId, smsBody) -------------
-    fun parseSms(smsId: String, smsBody: String) {
-        // ensure model loaded
-        if (_currentModelId.value == null) {
-            _statusMessage.value = "Please load a model before parsing."
-            return
-        }
-
-        // optimistic: set working placeholder
-        _parsedJsonBySms.value = _parsedJsonBySms.value + (smsId to "Parsing...")
-
-        viewModelScope.launch {
-            try {
-                val prompt = extractionPromptTemplate + "\n\nSMS: \"${smsBody.replace("\"", "\\\"")}\"\nJSON:"
-                var jsonResult = ""
-                RunAnywhere.generateStream(prompt).collect { token ->
-                    jsonResult += token
-                    // optional: partial updates (not necessary)
-                    _parsedJsonBySms.value = _parsedJsonBySms.value + (smsId to jsonResult)
-                }
-
-                // clean up whitespace
-                jsonResult = jsonResult.trim()
-                _parsedJsonBySms.value = _parsedJsonBySms.value + (smsId to jsonResult)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _parsedJsonBySms.value = _parsedJsonBySms.value + (smsId to "Error: ${e.message}")
-            }
-        }
+    fun detectScam(smsId: String, smsBody: String) {
+        viewModelScope.launch { internalDetectScam(smsId, smsBody) }
     }
 
-    // ------------- detectScam(smsId, smsBody) -------------
-    fun detectScam(smsId: String, smsBody: String) {
-        if (_currentModelId.value == null) {
-            _statusMessage.value = "Please load a model before running scam detection."
-            return
-        }
+    private suspend fun internalDetectScam(smsId: String, smsBody: String) {
+        if (_currentModelId.value == null) return
 
-        _scamResultBySms.value = _scamResultBySms.value + (smsId to "Checking...")
+        _scamResultBySms.value += (smsId to "Checking...")
 
-        viewModelScope.launch {
-            try {
-                val prompt = scamPromptTemplate + "\n\nSMS: \"${smsBody.replace("\"", "\\\"")}\"\nAnswer:"
-                var label = ""
+        try {
+            val prompt = "$scamPromptTemplate\n\nSMS: \"${smsBody.replace("\"", "\\\"")}\"\nAnswer:"
+            var label = ""
+            withTimeoutOrNull(10000L) {
                 RunAnywhere.generateStream(prompt).collect { token ->
                     label += token
-                    // quick update
-                    _scamResultBySms.value = _scamResultBySms.value + (smsId to label.trim())
                 }
-                _scamResultBySms.value = _scamResultBySms.value + (smsId to label.trim())
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _scamResultBySms.value = _scamResultBySms.value + (smsId to "error")
             }
+            // Clean up response (remove punctuation, newlines)
+            val cleanLabel = label.trim().lowercase().replace(".", "")
+            _scamResultBySms.value += (smsId to cleanLabel)
+        } catch (_: Exception) {
+            _scamResultBySms.value += (smsId to "error")
         }
     }
+
+    // ============================================================================================
+    // SECTION 6: HELPER UTILITIES
+    // ============================================================================================
+
+    private fun extractFirstJsonObject(text: String): String? {
+        var depth = 0
+        var start = -1
+        for (i in text.indices) {
+            val c = text[i]
+            if (c == '{') {
+                if (depth == 0) start = i
+                depth++
+            } else if (c == '}') {
+                depth--
+                if (depth == 0 && start >= 0) {
+                    return text.substring(start, i + 1)
+                }
+            }
+        }
+        return null
+    }
+
+    // Runs on Background Thread to prevent UI freeze
+    private suspend fun quickHeuristicJson(sms: String): String = withContext(Dispatchers.Default) {
+        // Regex Patterns
+        val amountPattern = Pattern.compile("""(?i)(?:INR|Rs\.?|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)""")
+        val balPattern = Pattern.compile("""(?i)(?:Avl Bal|Available balance|Bal(?:ance)?:)\s*(?:INR|Rs\.?|₹)?\s*([0-9,]+(?:\.[0-9]{1,2})?)""")
+        val datePattern = Pattern.compile("""\b(\d{2}[/-]\d{2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})\b""")
+        val acctPattern = Pattern.compile("""(?i)(?:a/c|acct|account|ending|xx)\s*[:#]?\s*([0-9A-Za-z]+)""")
+
+        val amount = amountPattern.matcher(sms).let { if (it.find()) it.group(1) else null }
+        val balance = balPattern.matcher(sms).let { if (it.find()) it.group(1) else null }
+        val date = datePattern.matcher(sms).let { if (it.find()) it.group(1) else null }
+        val acct = acctPattern.matcher(sms).let { if (it.find()) it.group(1) else null }
+
+        fun cleanNum(s: String?): Number? {
+            if (s == null) return null
+            val cleaned = s.replace(",", "").replace("₹", "").replace("Rs", "", ignoreCase = true).trim()
+            return try {
+                if (cleaned.contains(".")) cleaned.toDouble() else cleaned.toInt()
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        val amtNum = cleanNum(amount)
+        val balNum = cleanNum(balance)
+        val type = if (sms.contains("credit", true) || sms.contains("credited", true)) "credit"
+        else if (sms.contains("debit", true) || sms.contains("debited", true)) "debit"
+        else "info"
+
+        return@withContext buildString {
+            append("{")
+            append("\"amount\":${amtNum ?: "null"},")
+            append("\"currency\":\"INR\",")
+            append("\"merchant\":null,")
+            append("\"type\":\"$type\",")
+            append("\"date\":${if (date != null) "\"${normalizeDate(date)}\"" else "null"},")
+            append("\"account_tail\":${if (acct != null) "\"$acct\"" else "null"},")
+            append("\"balance\":${balNum ?: "null"},")
+            append("\"raw_text\":\"${sms.replace("\"", "\\\"")}\"")
+            append("}")
+        }
+    }
+
+    private fun normalizeDate(s: String): String {
+        if (s.matches(Regex("""\d{4}-\d{2}-\d{2}"""))) return s
+        val parts = s.split('/', '-')
+        return try {
+            if (parts.size == 3) {
+                val d = parts[0]
+                val m = parts[1]
+                var y = parts[2]
+                if (y.length == 2) y = "20$y"
+                String.format("%04d-%02d-%02d", y.toInt(), m.toInt(), d.toInt())
+            } else s
+        } catch (_: Exception) { s }
+    }
+
+    // Manually save edited JSON from UI back into the parsed map
+    fun forceSaveParsedJson(smsId: String, json: String) {
+        _parsedJsonBySms.value += (smsId to json)
+    }
+
 }

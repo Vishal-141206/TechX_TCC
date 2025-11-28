@@ -2,6 +2,7 @@ package com.runanywhere.startup_hackathon20
 
 import android.Manifest
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -18,9 +19,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.runanywhere.startup_hackathon20.ui.theme.Startup_hackathon20Theme
 
@@ -40,7 +43,6 @@ class MainActivity : ComponentActivity() {
 fun RequestSmsAndAudioPermissionButton(
     onPermissionGranted: () -> Unit
 ) {
-    // We can ask for multiple permissions at once
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -126,15 +128,16 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 )
             }
 
-            // Messages List
             val listState = rememberLazyListState()
 
             // SMS Import Section
             val context = LocalContext.current
             val smsList by viewModel.smsList.collectAsState()
             val isImportingSms by viewModel.isImportingSms.collectAsState()
-            val parsedJsonBySms by viewModel.parsedJsonBySms.collectAsState()
-            val scamResultBySms by viewModel.scamResultBySms.collectAsState()
+
+            // New: parsed/scam maps collected once
+            val parsedMap by viewModel.parsedJsonBySms.collectAsState()
+            val scamMap by viewModel.scamResultBySms.collectAsState()
 
             // Permission + Import row
             Row(
@@ -145,8 +148,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 RequestSmsAndAudioPermissionButton {
-                    // permission granted callback — optional auto-import:
-                     viewModel.importSms(context)
+                    viewModel.importSms(context)
                 }
 
                 Button(onClick = { viewModel.importSms(context) }, enabled = !isImportingSms) {
@@ -167,16 +169,17 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 250.dp),
+                        .heightIn(max = 200.dp),
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(smsList.take(6)) { sms ->
+                        var showEditDialog by remember { mutableStateOf(false) }
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    // optional: show details or parse on click
+                                    // optional: show details
                                 },
                             shape = RoundedCornerShape(8.dp)
                         ) {
@@ -193,26 +196,8 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                         ?: "",
                                     style = MaterialTheme.typography.bodySmall
                                 )
-                                
-                                // Results display (if any)
-                                if (parsedJsonBySms.containsKey(sms.id)) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Extracted: ${parsedJsonBySms[sms.id]}",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                                if (scamResultBySms.containsKey(sms.id)) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Scam Check: ${scamResultBySms[sms.id]}",
-                                        fontSize = 10.sp,
-                                        color = if (scamResultBySms[sms.id] == "likely_scam") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
-                                    )
-                                }
 
-                                // small action row: Parse / Scam
+                                // Action row: Parse + Scam
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.End
@@ -222,13 +207,72 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                     }) {
                                         Text("Parse")
                                     }
+
                                     TextButton(onClick = {
                                         viewModel.detectScam(sms.id, sms.body ?: "")
                                     }) {
                                         Text("Scam")
                                     }
+
+                                    TextButton(onClick = { showEditDialog = true }) {
+                                        Text("Edit")
+                                    }
+                                }
+
+                                // Show parsed JSON (if present)
+                                val parsed = parsedMap[sms.id]
+                                if (!parsed.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Parsed JSON:", style = MaterialTheme.typography.labelSmall)
+
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        Text(
+                                            text = parsed,
+                                            modifier = Modifier.padding(8.dp),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+
+                                // Show Scam status if present
+                                val scamStatus = scamMap[sms.id]
+                                if (!scamStatus.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    val color = when {
+                                        scamStatus.contains("likely_scam", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                                        scamStatus.contains("safe", ignoreCase = true) -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+
+                                    Text(
+                                        text = "Scam: $scamStatus",
+                                        color = color,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
                                 }
                             }
+                        }
+
+                        // Edit dialog when Edit button clicked
+                        if (showEditDialog) {
+                            val existing = parsedMap[sms.id] ?: ""
+                            EditParsedDialog(
+                                initialText = existing,
+                                onDismiss = { showEditDialog = false },
+                                onSave = { newText ->
+                                    // save edited JSON back into ViewModel parsed map
+                                    viewModel.forceSaveParsedJson(sms.id, newText)
+                                    showEditDialog = false
+                                    // optional toast
+                                    Toast.makeText(context, "Parsed JSON updated", Toast.LENGTH_SHORT).show()
+                                }
+                            )
                         }
                     }
                 }
@@ -279,6 +323,39 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     enabled = !isLoading && inputText.isNotBlank() && currentModelId != null
                 ) {
                     Text("Send")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EditParsedDialog(initialText: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf(TextFieldValue(initialText)) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Edit parsed JSON", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                TextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = { onSave(text.text) }) { Text("Save") }
                 }
             }
         }

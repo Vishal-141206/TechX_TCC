@@ -13,13 +13,30 @@ data class RawSms(
     val date: Long
 )
 
-fun readSmsInbox(context: Context, limit: Int = 200): List<RawSms> {
+/**
+ * Reads SMS from Inbox.
+ * @param limit Maximum number of messages to read.
+ * @param daysLookBack If set, only read messages from the last N days.
+ */
+fun readSmsInbox(context: Context, limit: Int = 1000, daysLookBack: Int? = null): List<RawSms> {
     val uriSms: Uri = Uri.parse("content://sms/inbox")
+    
+    var selection: String? = null
+    var selectionArgs: Array<String>? = null
+
+    if (daysLookBack != null) {
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.DAY_OF_YEAR, -daysLookBack)
+        val minDate = calendar.timeInMillis
+        selection = "date >= ?"
+        selectionArgs = arrayOf(minDate.toString())
+    }
+
     val cursor: Cursor? = context.contentResolver.query(
         uriSms,
         arrayOf("_id", "address", "body", "date"),
-        null,
-        null,
+        selection,
+        selectionArgs,
         "date DESC"
     )
 
