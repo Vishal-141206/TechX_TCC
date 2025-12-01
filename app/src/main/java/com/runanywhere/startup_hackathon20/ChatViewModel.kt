@@ -63,8 +63,32 @@ class ChatViewModel : ViewModel() {
     @Suppress("unused")
     val processingProgress: StateFlow<Int> = _processingProgress
 
+    // --- Cash Flow Prediction State ---
+    private val _cashFlowPrediction = MutableStateFlow<CashFlowPrediction?>(null)
+    val cashFlowPrediction: StateFlow<CashFlowPrediction?> = _cashFlowPrediction
+
+    private val _isPredicting = MutableStateFlow(false)
+    val isPredicting: StateFlow<Boolean> = _isPredicting
+
+    private val cashFlowPredictor = CashFlowPredictor()
+
+    // --- Voice Manager State ---
+    private var voiceManager: VoiceManager? = null
+
+    private val _isSpeaking = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking
+
     init {
         loadAvailableModels()
+    }
+
+    /**
+     * Initialize voice manager (call from UI with context)
+     */
+    fun initializeVoice(context: Context) {
+        if (voiceManager == null) {
+            voiceManager = VoiceManager(context)
+        }
     }
 
     // ============================================================================================
@@ -435,6 +459,129 @@ Now classify:
     // Manually save edited JSON from UI back into the parsed map
     fun forceSaveParsedJson(smsId: String, json: String) {
         _parsedJsonBySms.value += (smsId to json)
+    }
+
+    // ============================================================================================
+    // SECTION 7: CASH FLOW PREDICTION
+    // ============================================================================================
+
+    /**
+     * Analyzes all parsed transactions and generates cash flow predictions
+     */
+    fun predictCashFlow() {
+        viewModelScope.launch {
+            _isPredicting.value = true
+            _statusMessage.value = "Analyzing cash flow patterns..."
+
+            try {
+                // Create a map of SMS ID to RawSms for easy lookup
+                val smsMap = _smsList.value.associateBy { it.id }
+
+                // Get prediction
+                val prediction = cashFlowPredictor.predictCashFlow(
+                    parsedJsonMap = _parsedJsonBySms.value,
+                    smsListMap = smsMap
+                )
+
+                _cashFlowPrediction.value = prediction
+                _statusMessage.value = "Cash flow prediction complete!"
+            } catch (e: Exception) {
+                _statusMessage.value = "Prediction failed: ${e.message}"
+                _cashFlowPrediction.value = null
+            } finally {
+                _isPredicting.value = false
+            }
+        }
+    }
+
+    /**
+     * Clear cash flow prediction
+     */
+    fun clearCashFlowPrediction() {
+        _cashFlowPrediction.value = null
+    }
+
+    // ============================================================================================
+    // SECTION 8: VOICE FEATURES
+    // ============================================================================================
+
+    /**
+     * Speak cash flow prediction summary
+     */
+    fun speakCashFlowSummary() {
+        val prediction = _cashFlowPrediction.value ?: return
+        voiceManager?.let { vm ->
+            _isSpeaking.value = true
+            vm.speakCashFlowSummary(prediction) {
+                _isSpeaking.value = false
+            }
+        }
+    }
+
+    /**
+     * Speak quick transaction stats
+     */
+    fun speakTransactionStats() {
+        val transactions = _parsedJsonBySms.value
+        if (transactions.isEmpty()) return
+
+        var totalDebits = 0.0
+        var totalCredits = 0.0
+
+        transactions.values.forEach { jsonStr ->
+            try {
+                val json = org.json.JSONObject(jsonStr)
+                val amount = json.optDouble("amount", 0.0)
+                val type = json.optString("type", "info")
+
+                when (type) {
+                    "debit" -> totalDebits += amount
+                    "credit" -> totalCredits += amount
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        voiceManager?.let { vm ->
+            _isSpeaking.value = true
+            val summary =
+                vm.generateTransactionSummary(transactions.size, totalDebits, totalCredits)
+            vm.speak(summary) {
+                _isSpeaking.value = false
+            }
+        }
+    }
+
+    /**
+     * Speak scam detection results
+     */
+    fun speakScamResults() {
+        val scamResults = _scamResultBySms.value
+        val scamCount = scamResults.values.count { it.contains("likely_scam", ignoreCase = true) }
+
+        voiceManager?.let { vm ->
+            _isSpeaking.value = true
+            val alert = vm.generateScamAlert(scamCount)
+            vm.speak(alert) {
+                _isSpeaking.value = false
+            }
+        }
+    }
+
+    /**
+     * Stop speaking immediately
+     */
+    fun stopSpeaking() {
+        voiceManager?.stop()
+        _isSpeaking.value = false
+    }
+
+    /**
+     * Cleanup voice manager
+     */
+    override fun onCleared() {
+        super.onCleared()
+        voiceManager?.shutdown()
     }
 
 }

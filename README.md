@@ -1,22 +1,50 @@
-# RunAnywhere SDK - Simple Chat App
+# 💰 Privacy-First Personal Finance Manager
 
-A simple Android chat application demonstrating the RunAnywhere SDK for on-device AI inference.
+A production-ready Android app that analyzes financial SMS messages using **100% on-device AI** - no
+cloud, no tracking, complete privacy.
 
-## What This App Does
+[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local-green)](.)
+[![AI](https://img.shields.io/badge/AI-On--Device-blue)](.)
+[![Voice](https://img.shields.io/badge/Voice-TTS%20Enabled-orange)](.)
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-success)](.)
 
-This is a minimal example showing how to:
+> **Hackathon Project:** Privacy-First Personal Finance Manager with On-Device AI
 
-1. Initialize the RunAnywhere SDK
-2. Download AI models (LLMs)
-3. Load models into memory
-4. Run text generation with streaming responses
+## 🎯 What This App Does
+
+A complete personal finance manager that:
+
+1. **Reads** your bank SMS messages (last 30 days)
+2. **Extracts** transaction details using on-device AI
+3. **Detects** scam/phishing messages automatically
+4. **Predicts** your next month's cash flow
+5. **Finds** recurring subscriptions and bills
+6. **Analyzes** spending by category with trends
+7. **Speaks** financial summaries out loud (TTS)
+8. **Works** 100% offline - no data leaves your device
+
+**Privacy Guarantee:** All processing happens on your phone. Works in Airplane Mode.
 
 ## Features
+
+### Core Features
 
 - **Model Management**: Download and load AI models directly in the app
 - **Real-time Streaming**: See AI responses generate word-by-word
 - **Simple UI**: Clean Jetpack Compose interface
 - **On-Device AI**: All inference runs locally on your Android device
+
+### NEW: Financial SMS Analysis
+
+- **SMS Import**: Read and filter financial SMS messages
+- **AI Parsing**: Extract transaction details (amount, merchant, category)
+- **Scam Detection**: Identify suspicious/phishing messages
+- **💰 Cash Flow Prediction**: Smart financial forecasting with:
+    - Next month income/expense predictions
+    - Recurring transaction detection (subscriptions, bills)
+    - Category-wise spending analysis with trends
+    - Personalized financial insights
+    - Confidence scoring based on data quality
 
 ## Quick Start
 
@@ -44,6 +72,16 @@ This is a minimal example showing how to:
 1. Type a message in the text field
 2. Tap "Send"
 3. Watch the AI response generate in real-time
+
+### 5. Try Cash Flow Prediction! 💰 (New Feature)
+
+1. Grant SMS permissions (tap "Grant Permissions")
+2. Import SMS messages (tap "Import SMS")
+3. Parse some transaction messages (tap "Parse" on each SMS)
+4. Click "💰 Predict Cash Flow" to see your financial forecast
+5. Review predictions, insights, and spending trends
+
+**See:** [HOW_TO_USE_CASH_FLOW.md](HOW_TO_USE_CASH_FLOW.md) for detailed instructions
 
 ## Available Models
 
@@ -77,6 +115,9 @@ ChatScreen (UI layer)
 - `MyApplication.kt` - SDK initialization and model registration
 - `ChatViewModel.kt` - Business logic and state management
 - `MainActivity.kt` - UI components and composables
+- `CashFlowPredictor.kt` - **NEW:** Financial prediction algorithm
+- `SMSreader.kt` - SMS import utilities
+- `TransactionRepo.kt` - Transaction processing logic
 
 ## Requirements
 
@@ -122,9 +163,22 @@ Want to customize this app? Try:
 
 ## Resources
 
+### Getting Started
+
 - [Full Quick Start Guide](app/src/main/java/com/runanywhere/startup_hackathon20/QUICK_START_ANDROID.md)
 - [RunAnywhere SDK Repository](https://github.com/RunanywhereAI/runanywhere-sdks)
 - [SDK Documentation](https://github.com/RunanywhereAI/runanywhere-sdks/blob/main/CLAUDE.md)
+
+### Cash Flow Prediction Documentation
+
+- 📑 **[Documentation Index](CASHFLOW_INDEX.md)** - Navigate all cash flow docs ⭐ START HERE
+- 📘 [User Guide: How to Use Cash Flow](HOW_TO_USE_CASH_FLOW.md) - Step-by-step instructions
+- 🔧 [Developer Guide](DEVELOPER_GUIDE_CASHFLOW.md) - Technical implementation details
+- 📋 [Feature Overview](CASH_FLOW_PREDICTION_FEATURE.md) - Complete feature description
+- ⚡ [Quick Reference](CASHFLOW_QUICK_REFERENCE.md) - Quick lookup guide
+- 🧪 [Testing Checklist](TESTING_CHECKLIST.md) - 140 test cases
+- 🎨 [Visual Guide](VISUAL_GUIDE_CASHFLOW.md) - UI flow diagrams
+- 📊 [Implementation Summary](IMPLEMENTATION_SUMMARY.md) - What was built
 
 ## License
 

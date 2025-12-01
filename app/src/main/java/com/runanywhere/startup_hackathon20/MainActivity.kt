@@ -68,15 +68,22 @@ fun RequestSmsAndAudioPermissionButton(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
+    val context = LocalContext.current
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val currentModelId by viewModel.currentModelId.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
+    val isSpeaking by viewModel.isSpeaking.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var showModelSelector by remember { mutableStateOf(false) }
+    
+    // Initialize voice manager once
+    LaunchedEffect(Unit) {
+        viewModel.initializeVoice(context)
+    }
 
     Scaffold(
         topBar = {
@@ -139,6 +146,11 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             val parsedMap by viewModel.parsedJsonBySms.collectAsState()
             val scamMap by viewModel.scamResultBySms.collectAsState()
 
+            // Cash Flow Prediction State
+            val cashFlowPrediction by viewModel.cashFlowPrediction.collectAsState()
+            val isPredicting by viewModel.isPredicting.collectAsState()
+            var showPredictionDialog by remember { mutableStateOf(false) }
+
             // Permission + Import row
             Row(
                 modifier = Modifier
@@ -156,15 +168,144 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 }
             }
 
+            // Cash Flow Prediction Button
+            if (smsList.isNotEmpty() && parsedMap.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Button(
+                        onClick = {
+                            viewModel.predictCashFlow()
+                            showPredictionDialog = true
+                        },
+                        enabled = !isPredicting,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary
+                        )
+                    ) {
+                        Text(if (isPredicting) "Analyzing..." else "💰 Predict Cash Flow")
+                    }
+                }
+            }
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // Show Cash Flow Summary Card if prediction exists
+            if (cashFlowPrediction != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clickable { showPredictionDialog = true },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "📊 Cash Flow Summary",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                // Voice button
+                                IconButton(onClick = {
+                                    if (isSpeaking) {
+                                        viewModel.stopSpeaking()
+                                    } else {
+                                        viewModel.speakCashFlowSummary()
+                                    }
+                                }) {
+                                    Text(if (isSpeaking) "🔇" else "🔊", fontSize = 18.sp)
+                                }
+
+                                Text(
+                                    "Tap for details",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Next Month", fontSize = 11.sp)
+                                Text(
+                                    "₹${
+                                        String.format(
+                                            "%.0f",
+                                            cashFlowPrediction!!.predictedBalance
+                                        )
+                                    }",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (cashFlowPrediction!!.predictedBalance >= 0)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.error
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Confidence", fontSize = 11.sp)
+                                Text(
+                                    cashFlowPrediction!!.confidence,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Show Cash Flow Prediction Dialog
+            if (showPredictionDialog && cashFlowPrediction != null) {
+                CashFlowPredictionDialog(
+                    prediction = cashFlowPrediction!!,
+                    onDismiss = { showPredictionDialog = false }
+                )
+            }
 
             // Show a small preview list of imported SMS (max 6)
             if (smsList.isNotEmpty()) {
-                Text(
-                    text = "Imported SMS (preview):",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(start = 16.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Imported SMS (preview):",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+
+                    // Voice summary button
+                    if (parsedMap.isNotEmpty()) {
+                        IconButton(onClick = {
+                            if (isSpeaking) {
+                                viewModel.stopSpeaking()
+                            } else {
+                                viewModel.speakTransactionStats()
+                            }
+                        }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (isSpeaking) "🔇" else "🔊", fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Stats", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
 
                 LazyColumn(
                     modifier = Modifier
@@ -337,7 +478,9 @@ fun EditParsedDialog(initialText: String, onDismiss: () -> Unit, onSave: (String
         Surface(
             shape = MaterialTheme.shapes.medium,
             tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text("Edit parsed JSON", style = MaterialTheme.typography.titleMedium)
@@ -491,6 +634,229 @@ fun ModelItem(
                         enabled = model.isDownloaded
                     ) {
                         Text("Load")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CashFlowPredictionDialog(prediction: CashFlowPrediction, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 8.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+        ) {
+            LazyColumn(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "💰 Cash Flow Prediction",
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                        TextButton(onClick = onDismiss) {
+                            Text("Close")
+                        }
+                    }
+                    Text(
+                        text = "Confidence: ${prediction.confidence}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = when (prediction.confidence) {
+                            "High" -> MaterialTheme.colorScheme.primary
+                            "Medium" -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.error
+                        }
+                    )
+                }
+
+                // Summary Cards
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Next Month Summary", style = MaterialTheme.typography.titleMedium)
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text("Expected Income", fontSize = 12.sp)
+                                    Text(
+                                        "₹${String.format("%.2f", prediction.nextMonthIncome)}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Expected Expenses", fontSize = 12.sp)
+                                    Text(
+                                        "₹${String.format("%.2f", prediction.nextMonthExpenses)}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider()
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text("Net Cash Flow", fontSize = 12.sp)
+                            Text(
+                                "₹${String.format("%.2f", prediction.predictedBalance)}",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = if (prediction.predictedBalance >= 0)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+
+                // Insights
+                if (prediction.insights.isNotEmpty()) {
+                    item {
+                        Text("Key Insights", style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(prediction.insights) { insight ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Text(
+                                text = insight,
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+
+                // Category Breakdown
+                if (prediction.categoryBreakdown.isNotEmpty()) {
+                    item {
+                        Text("Spending by Category", style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(prediction.categoryBreakdown.entries.sortedByDescending { it.value.totalSpent }) { (_, categorySpend) ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = categorySpend.category,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Text(
+                                        text = "${
+                                            String.format(
+                                                "%.1f",
+                                                categorySpend.percentageOfTotal
+                                            )
+                                        }%",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "₹${
+                                        String.format(
+                                            "%.2f",
+                                            categorySpend.totalSpent
+                                        )
+                                    } (${categorySpend.transactionCount} txns)",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "Trend: ${categorySpend.trend}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = when (categorySpend.trend) {
+                                        "Increasing" -> MaterialTheme.colorScheme.error
+                                        "Decreasing" -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Recurring Transactions
+                if (prediction.recurringTransactions.isNotEmpty()) {
+                    item {
+                        Text("Recurring Transactions", style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(prediction.recurringTransactions.take(10)) { recurring ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = recurring.merchant,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Text(
+                                        text = "${recurring.confidence}% confident",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (recurring.confidence >= 75)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "₹${
+                                        String.format(
+                                            "%.2f",
+                                            recurring.averageAmount
+                                        )
+                                    } • ${recurring.frequency}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                if (recurring.nextExpectedDate != null) {
+                                    Text(
+                                        text = "Next: ${recurring.nextExpectedDate}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
