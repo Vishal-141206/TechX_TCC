@@ -1,96 +1,178 @@
 package com.runanywhere.startup_hackathon20
 
-import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import android.content.Context
 import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
-// 1. Define the clean data model (The "Goal" output)
-data class Transaction(
-    val amount: Double,
-    val merchant: String,
-    val category: String,
-    val isSuspicious: Boolean,
-    val riskReason: String?,
-    val date: Long
-)
+/**
+ * Repository for managing transaction data persistence
+ */
+class TransactionRepo(private val context: Context) {
 
-class TransactionRepository {
-
-    // 2. The JSON Schema we force the AI to follow
-    // This strictly enforces the "Structured Output" requirement of the hackathon
-    @Suppress("unused")
-    private val extractionSchema = """
-    {
-      "type": "object",
-      "properties": {
-        "is_transaction": { "type": "boolean" },
-        "amount": { "type": "number" },
-        "merchant": { "type": "string" },
-        "category": { "type": "string", "enum": ["Food", "Transport", "Bills", "Shopping", "Health", "Subscription", "Transfer", "Other"] },
-        "is_suspicious": { "type": "boolean" },
-        "risk_reason": { "type": "string" }
-      },
-      "required": ["is_transaction", "amount", "merchant", "category", "is_suspicious"]
+    companion object {
+        private const val TRANSACTIONS_FILE = "transactions.json"
+        private const val CACHE_FILE = "parsed_sms_cache.json"
     }
-    """.trimIndent()
 
-    suspend fun processMessages(rawMessages: List<RawSms>): List<Transaction> = withContext(Dispatchers.IO) {
-        val cleanTransactions = mutableListOf<Transaction>()
+    /**
+     * Save parsed transactions to local storage
+     */
+    fun saveTransactions(transactions: Map<String, String>): Boolean {
+        return try {
+            val jsonObject = JSONObject()
+            transactions.forEach { (key, value) ->
+                jsonObject.put(key, value)
+            }
 
-        for (sms in rawMessages) {
+            context.openFileOutput(TRANSACTIONS_FILE, Context.MODE_PRIVATE).use { output ->
+                output.write(jsonObject.toString().toByteArray())
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Load parsed transactions from local storage
+     */
+    fun loadTransactions(): Map<String, String> {
+        return try {
+            val file = File(context.filesDir, TRANSACTIONS_FILE)
+            if (!file.exists()) return emptyMap()
+
+            val jsonString = context.openFileInput(TRANSACTIONS_FILE).bufferedReader().use { it.readText() }
+            val jsonObject = JSONObject(jsonString)
+            val map = mutableMapOf<String, String>()
+
+            jsonObject.keys().forEach { key ->
+                map[key] = jsonObject.getString(key)
+            }
+
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
+     * Save parsed SMS cache
+     */
+    fun saveParsedCache(parsedMap: Map<String, String>): Boolean {
+        return try {
+            val jsonObject = JSONObject()
+            parsedMap.forEach { (key, value) ->
+                jsonObject.put(key, value)
+            }
+
+            context.openFileOutput(CACHE_FILE, Context.MODE_PRIVATE).use { output ->
+                output.write(jsonObject.toString().toByteArray())
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Load parsed SMS cache
+     */
+    fun loadParsedCache(): Map<String, String> {
+        return try {
+            val file = File(context.filesDir, CACHE_FILE)
+            if (!file.exists()) return emptyMap()
+
+            val jsonString = context.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
+            val jsonObject = JSONObject(jsonString)
+            val map = mutableMapOf<String, String>()
+
+            jsonObject.keys().forEach { key ->
+                map[key] = jsonObject.getString(key)
+            }
+
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /**
+     * Export transactions to CSV for sharing
+     */
+    fun exportToCsv(transactions: Map<String, String>): String {
+        val csv = StringBuilder()
+        csv.append("Date,Amount,Type,Merchant,Category,Balance\n")
+
+        transactions.values.forEach { json ->
             try {
-                // 3. Construct the prompt for the Local LLM
-                val prompt = "Extract financial details from this SMS. If it is a scam, flag it. SMS: \"${sms.body}\""
+                val obj = JSONObject(json)
+                val date = obj.optString("date", "Unknown")
+                val amount = obj.optDouble("amount", 0.0)
+                val type = obj.optString("type", "info")
+                val merchant = obj.optString("merchant", "Unknown")
+                val balance = obj.optDouble("balance", 0.0)
 
-                // --- START AI SDK INTEGRATION ---
-                // TODO: Replace 'RunAnywhere.infer' with the actual function from the starter repo/documentation.
-                // We are passing the schema to force valid JSON output.
-
-                // val jsonResponse = RunAnywhereSDK.generateStructured(
-                //     prompt = prompt,
-                //     schema = extractionSchema
-                // )
-
-                // MOCK for testing until you connect the SDK:
-                // (Delete this mock block when real AI is connected)
-                val jsonResponse = mockAiResponse(sms.body)
-                // --- END AI SDK INTEGRATION ---
-
-                // 4. Parse the JSON result
-                val json = JSONObject(jsonResponse)
-
-                if (json.optBoolean("is_transaction")) {
-                    cleanTransactions.add(
-                        Transaction(
-                            amount = json.optDouble("amount", 0.0),
-                            merchant = json.optString("merchant", "Unknown"),
-                            category = json.optString("category", "Other"),
-                            isSuspicious = json.optBoolean("is_suspicious"),
-                            riskReason = json.optString("risk_reason"),
-                            date = sms.date
-                        )
-                    )
+                // Simple category detection
+                val category = when {
+                    merchant.contains("amazon", true) || merchant.contains("flipkart", true) -> "Shopping"
+                    merchant.contains("zomato", true) || merchant.contains("swiggy", true) -> "Food"
+                    merchant.contains("uber", true) || merchant.contains("ola", true) -> "Transport"
+                    else -> "Other"
                 }
 
+                csv.append("$date,$amount,$type,\"$merchant\",$category,$balance\n")
             } catch (e: Exception) {
-                Log.e("TransactionRepo", "AI Extraction Failed for msg: ${sms.id}", e)
+                // Skip invalid entries
             }
         }
-        return@withContext cleanTransactions
+
+        return csv.toString()
     }
 
-    // Temporary Mock function to test your app logic without waiting for the AI
-    private fun mockAiResponse(body: String?): String {
-        return """
-            {
-                "is_transaction": true,
-                "amount": 150.00,
-                "merchant": "MOCK_MERCHANT",
-                "category": "Food",
-                "is_suspicious": false,
-                "risk_reason": ""
+    /**
+     * Get monthly summary
+     */
+    fun getMonthlySummary(transactions: Map<String, String>): Map<String, Double> {
+        val monthlySummary = mutableMapOf<String, Double>()
+        val dateFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
+
+        transactions.values.forEach { json ->
+            try {
+                val obj = JSONObject(json)
+                val dateStr = obj.optString("date")
+                val amount = obj.optDouble("amount", 0.0)
+                val type = obj.optString("type")
+
+                if (dateStr.isNotBlank() && amount > 0) {
+                    val month = dateStr.substring(0, 7) // YYYY-MM
+                    val key = if (type == "debit") "expense_$month" else "income_$month"
+
+                    monthlySummary[key] = monthlySummary.getOrDefault(key, 0.0) + amount
+                }
+            } catch (e: Exception) {
+                // Skip invalid entries
             }
-        """.trimIndent()
+        }
+
+        return monthlySummary
+    }
+
+    /**
+     * Clear all stored data
+     */
+    fun clearAllData(): Boolean {
+        return try {
+            arrayOf(TRANSACTIONS_FILE, CACHE_FILE).forEach { fileName ->
+                val file = File(context.filesDir, fileName)
+                if (file.exists()) {
+                    file.delete()
+                }
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 }

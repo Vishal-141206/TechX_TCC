@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Internal files directory -->
+    <files-path name="internal_files" path="."/>
+
+    <!-- Cache directory -->
+    <cache-path name="cache" path="."/>
+
+    <!-- External files directory -->
+    <external-files-path name="external_files" path="."/>
+
+    <!-- External cache directory -->
+    <external-cache-path name="external_cache" path="."/>
+
+    <!-- Root of external storage -->
+    <external-path name="external" path="."/>
+
+    <!-- Reports directory -->
+    <files-path name="reports" path="reports/"/>
+
+    <!-- Export directory -->
+    <external-files-path name="exports" path="exports/"/>
+</paths>

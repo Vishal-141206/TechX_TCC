@@ -1,358 +1,224 @@
 package com.runanywhere.startup_hackathon20
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.abs
 
 /**
- * Cash Flow Prediction Engine
- * Analyzes transaction patterns and predicts future cash flows
+ * Cash Flow Predictor that analyzes parsed transaction data
+ * and provides financial insights and predictions
  */
-
-data class CashFlowPrediction(
-    val nextMonthIncome: Double,
-    val nextMonthExpenses: Double,
-    val predictedBalance: Double,
-    val recurringTransactions: List<RecurringTransaction>,
-    val categoryBreakdown: Map<String, CategorySpend>,
-    val insights: List<String>,
-    val confidence: String // "High", "Medium", "Low"
-)
-
-data class RecurringTransaction(
-    val merchant: String,
-    val averageAmount: Double,
-    val frequency: String, // "Monthly", "Weekly", "Daily"
-    val category: String,
-    val nextExpectedDate: String?,
-    val confidence: Int // 0-100
-)
-
-data class CategorySpend(
-    val category: String,
-    val totalSpent: Double,
-    val transactionCount: Int,
-    val averagePerTransaction: Double,
-    val percentageOfTotal: Double,
-    val trend: String // "Increasing", "Stable", "Decreasing"
-)
-
 class CashFlowPredictor {
 
-    /**
-     * Main prediction function
-     * Analyzes parsed SMS transactions and generates predictions
-     */
-    suspend fun predictCashFlow(
-        parsedJsonMap: Map<String, String>,
-        smsListMap: Map<String, RawSms>
-    ): CashFlowPrediction = withContext(Dispatchers.Default) {
-
-        // Parse all transactions
-        val transactions = parseTransactions(parsedJsonMap, smsListMap)
-        
-        if (transactions.isEmpty()) {
-            return@withContext CashFlowPrediction(
-                nextMonthIncome = 0.0,
-                nextMonthExpenses = 0.0,
-                predictedBalance = 0.0,
-                recurringTransactions = emptyList(),
-                categoryBreakdown = emptyMap(),
-                insights = listOf("Not enough transaction data to make predictions"),
-                confidence = "Low"
-            )
-        }
-
-        // Calculate metrics
-        val totalIncome = transactions.filter { it.type == "credit" }.sumOf { it.amount }
-        val totalExpenses = transactions.filter { it.type == "debit" }.sumOf { it.amount }
-        
-        // Analyze patterns
-        val recurringTransactions = detectRecurringTransactions(transactions)
-        val categoryBreakdown = analyzeCategorySpending(transactions)
-        
-        // Predict next month
-        val predictedIncome = predictNextMonthIncome(transactions)
-        val predictedExpenses = predictNextMonthExpenses(transactions, recurringTransactions)
-        val predictedBalance = predictedIncome - predictedExpenses
-        
-        // Generate insights
-        val insights = generateInsights(
-            totalIncome,
-            totalExpenses,
-            predictedBalance,
-            recurringTransactions,
-            categoryBreakdown
-        )
-        
-        // Calculate confidence based on data quality
-        val confidence = calculateConfidence(transactions)
-
-        return@withContext CashFlowPrediction(
-            nextMonthIncome = predictedIncome,
-            nextMonthExpenses = predictedExpenses,
-            predictedBalance = predictedBalance,
-            recurringTransactions = recurringTransactions,
-            categoryBreakdown = categoryBreakdown,
-            insights = insights,
-            confidence = confidence
-        )
-    }
-
-    private data class ParsedTransaction(
+    data class Transaction(
         val amount: Double,
+        val type: String,
+        val date: String?,
         val merchant: String?,
-        val category: String?,
-        val type: String, // debit/credit/info
-        val date: Date?,
-        val balance: Double?
+        val category: String = "Uncategorized"
     )
 
-    private fun parseTransactions(
+    fun predictCashFlow(
         parsedJsonMap: Map<String, String>,
-        smsListMap: Map<String, RawSms>
-    ): List<ParsedTransaction> {
-        val transactions = mutableListOf<ParsedTransaction>()
-        
-        for ((smsId, jsonString) in parsedJsonMap) {
-            if (jsonString == "Parsing..." || jsonString.isBlank()) continue
-            
+        smsMap: Map<String, RawSms>
+    ): CashFlowPrediction {
+        // Parse all transactions from JSON
+        val transactions = mutableListOf<Transaction>()
+        val categorySpending = mutableMapOf<String, Double>()
+
+        parsedJsonMap.forEach { (smsId, json) ->
             try {
-                val json = JSONObject(jsonString)
-                val amount = json.optDouble("amount", 0.0)
-                if (amount <= 0) continue
-                
-                val type = json.optString("type", "info")
-                if (type == "info") continue
-                
-                val merchant = json.optString("merchant").takeIf { it.isNotEmpty() }
-                val category = json.optString("category", "Other")
-                val balance = json.optDouble("balance", Double.NaN)
-                
-                // Parse date
-                val dateStr = json.optString("date").takeIf { it.isNotEmpty() }
-                val date = parseDate(dateStr) ?: smsListMap[smsId]?.date?.let { Date(it) }
-                
-                transactions.add(
-                    ParsedTransaction(
-                        amount = amount,
-                        merchant = merchant,
-                        category = category,
-                        type = type,
-                        date = date,
-                        balance = if (balance.isNaN()) null else balance
-                    )
-                )
-            } catch (_: Exception) {
-                continue
+                val obj = JSONObject(json)
+                val amount = obj.optDouble("amount", 0.0)
+                if (amount > 0) {
+                    val type = obj.optString("type", "info")
+                    val date = obj.optString("date")
+                    val merchant = obj.optString("merchant")
+
+                    val category = categorizeTransaction(merchant, type)
+                    transactions.add(Transaction(amount, type, date, merchant, category))
+
+                    // Track spending by category
+                    if (type == "debit") {
+                        categorySpending[category] = categorySpending.getOrDefault(category, 0.0) + amount
+                    }
+                }
+            } catch (e: Exception) {
+                // Skip invalid JSON
             }
         }
-        
-        return transactions.sortedByDescending { it.date }
-    }
 
-    private fun parseDate(dateStr: String?): Date? {
-        if (dateStr == null) return null
-        
-        val formats = listOf(
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()),
-            SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()),
-            SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+        // Calculate totals
+        val totalIncome = transactions
+            .filter { it.type == "credit" }
+            .sumOf { it.amount }
+
+        val totalExpenses = transactions
+            .filter { it.type == "debit" }
+            .sumOf { it.amount }
+
+        val netCashFlow = totalIncome - totalExpenses
+
+        // Analyze transaction patterns
+        val dailySpending = analyzeDailyPatterns(transactions)
+        val riskyDays = identifyRiskyDays(dailySpending)
+
+        // Get top spending categories
+        val topCategories = categorySpending
+            .toList()
+            .sortedByDescending { (_, amount) -> amount }
+            .take(5)
+            .toMap()
+
+        // Generate recommendation
+        val recommendation = generateRecommendation(
+            totalIncome,
+            totalExpenses,
+            netCashFlow,
+            dailySpending
         )
-        
-        for (format in formats) {
-            try {
-                return format.parse(dateStr)
-            } catch (_: Exception) {
-                continue
+
+        // Predict balance (simple prediction based on average daily spending)
+        val predictedBalance = predictFutureBalance(
+            totalIncome,
+            totalExpenses,
+            transactions
+        )
+
+        return CashFlowPrediction(
+            totalIncome = totalIncome,
+            totalExpenses = totalExpenses,
+            netCashFlow = netCashFlow,
+            predictedBalance = predictedBalance,
+            topCategories = topCategories,
+            riskyDays = riskyDays,
+            recommendation = recommendation
+        )
+    }
+
+    private fun categorizeTransaction(merchant: String?, type: String): String {
+        if (type != "debit") return "Income"
+
+        val merchantLower = merchant?.lowercase() ?: return "Uncategorized"
+
+        return when {
+            merchantLower.contains("zomato") || merchantLower.contains("swiggy") ||
+                    merchantLower.contains("restaurant") || merchantLower.contains("cafe") -> "Food & Dining"
+
+            merchantLower.contains("amazon") || merchantLower.contains("flipkart") ||
+                    merchantLower.contains("myntra") || merchantLower.contains("shopping") -> "Shopping"
+
+            merchantLower.contains("uber") || merchantLower.contains("ola") ||
+                    merchantLower.contains("petrol") || merchantLower.contains("fuel") -> "Transport"
+
+            merchantLower.contains("netflix") || merchantLower.contains("prime") ||
+                    merchantLower.contains("hotstar") || merchantLower.contains("subscription") -> "Entertainment"
+
+            merchantLower.contains("electricity") || merchantLower.contains("water") ||
+                    merchantLower.contains("bill") -> "Utilities"
+
+            merchantLower.contains("med") || merchantLower.contains("hospital") ||
+                    merchantLower.contains("pharma") -> "Healthcare"
+
+            else -> "Other Expenses"
+        }
+    }
+
+    private fun analyzeDailyPatterns(transactions: List<Transaction>): Map<String, Double> {
+        val dailySpending = mutableMapOf<String, Double>()
+
+        transactions.filter { it.type == "debit" && it.date != null }.forEach { transaction ->
+            val day = transaction.date?.substring(0, 10) // YYYY-MM-DD
+            if (day != null) {
+                dailySpending[day] = dailySpending.getOrDefault(day, 0.0) + transaction.amount
             }
         }
-        return null
+
+        return dailySpending
     }
 
-    private fun detectRecurringTransactions(transactions: List<ParsedTransaction>): List<RecurringTransaction> {
-        // Group by merchant
-        val merchantGroups = transactions
-            .filter { it.merchant != null && it.type == "debit" }
-            .groupBy { it.merchant!! }
-        
-        val recurring = mutableListOf<RecurringTransaction>()
-        
-        for ((merchant, txns) in merchantGroups) {
-            if (txns.size < 2) continue
-            
-            val avgAmount = txns.map { it.amount }.average()
-            val category = txns.firstOrNull()?.category ?: "Other"
-            
-            // Calculate frequency
-            val dates = txns.mapNotNull { it.date }.sorted()
-            if (dates.size < 2) continue
-            
-            val intervals = dates.zipWithNext { d1, d2 ->
-                ((d2.time - d1.time) / (1000 * 60 * 60 * 24)).toInt()
+    private fun identifyRiskyDays(dailySpending: Map<String, Double>): List<String> {
+        if (dailySpending.isEmpty()) return emptyList()
+
+        val averageSpending = dailySpending.values.average()
+        val spendingStdDev = calculateStandardDeviation(dailySpending.values.toList())
+
+        return dailySpending.filter { (_, amount) ->
+            amount > averageSpending + (spendingStdDev * 1.5)
+        }.keys.toList()
+    }
+
+    private fun calculateStandardDeviation(values: List<Double>): Double {
+        if (values.size < 2) return 0.0
+
+        val mean = values.average()
+        val variance = values.map { (it - mean).pow(2) }.average()
+        return sqrt(variance)
+    }
+
+    private fun generateRecommendation(
+        income: Double,
+        expenses: Double,
+        netCashFlow: Double,
+        dailySpending: Map<String, Double>
+    ): String {
+        val savingsRate = if (income > 0) ((income - expenses) / income * 100) else 0.0
+
+        return when {
+            netCashFlow < 0 -> {
+                "⚠️ You're spending more than you earn! Consider reducing expenses in top categories."
             }
-            
-            val avgInterval = intervals.average()
-            val frequency = when {
-                avgInterval <= 7 -> "Weekly"
-                avgInterval <= 35 -> "Monthly"
-                avgInterval <= 95 -> "Quarterly"
-                else -> "Yearly"
+            savingsRate < 10 -> {
+                "💡 Low savings rate. Try to save at least 20% of your income for better financial health."
             }
-            
-            // Calculate confidence based on consistency
-            val intervalVariance = intervals.map { abs(it - avgInterval) }.average()
-            val confidence = when {
-                intervalVariance < 3 -> 90
-                intervalVariance < 7 -> 75
-                intervalVariance < 14 -> 60
-                else -> 45
-            }.coerceIn(0, 100)
-            
-            // Predict next date
-            val lastDate = dates.last()
-            val nextDate = Calendar.getInstance().apply {
-                time = lastDate
-                add(Calendar.DAY_OF_YEAR, avgInterval.toInt())
+            dailySpending.size > 0 && dailySpending.values.any { it > income * 0.1 } -> {
+                "📊 High daily spending detected. Watch out for impulse purchases."
             }
-            val nextDateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(nextDate.time)
-            
-            recurring.add(
-                RecurringTransaction(
-                    merchant = merchant,
-                    averageAmount = avgAmount,
-                    frequency = frequency,
-                    category = category,
-                    nextExpectedDate = nextDateStr,
-                    confidence = confidence
-                )
-            )
+            netCashFlow > income * 0.3 -> {
+                "✅ Excellent! You're saving more than 30% of your income. Keep it up!"
+            }
+            else -> {
+                "👍 Good financial health. Maintain your spending habits."
+            }
         }
-        
-        return recurring.sortedByDescending { it.confidence }
     }
 
-    private fun analyzeCategorySpending(transactions: List<ParsedTransaction>): Map<String, CategorySpend> {
-        val debits = transactions.filter { it.type == "debit" }
-        val totalSpent = debits.sumOf { it.amount }
-        
-        val categoryMap = debits
-            .groupBy { it.category ?: "Other" }
-            .mapValues { (category, txns) ->
-                val categoryTotal = txns.sumOf { it.amount }
-                val count = txns.size
-                val avg = categoryTotal / count
-                val percentage = if (totalSpent > 0) (categoryTotal / totalSpent) * 100 else 0.0
-                
-                // Simple trend analysis (compare first half vs second half)
-                val firstHalf = txns.take(txns.size / 2).sumOf { it.amount }
-                val secondHalf = txns.drop(txns.size / 2).sumOf { it.amount }
-                val trend = when {
-                    txns.size < 4 -> "Stable"
-                    secondHalf > firstHalf * 1.2 -> "Increasing"
-                    secondHalf < firstHalf * 0.8 -> "Decreasing"
-                    else -> "Stable"
-                }
-                
-                CategorySpend(
-                    category = category,
-                    totalSpent = categoryTotal,
-                    transactionCount = count,
-                    averagePerTransaction = avg,
-                    percentageOfTotal = percentage,
-                    trend = trend
-                )
-            }
-        
-        return categoryMap
-    }
-
-    private fun predictNextMonthIncome(transactions: List<ParsedTransaction>): Double {
-        val credits = transactions.filter { it.type == "credit" }
-        if (credits.isEmpty()) return 0.0
-        
-        // Use average of last 3 months or all available data
-        val recentCredits = credits.take(minOf(30, credits.size))
-        return recentCredits.sumOf { it.amount } / (recentCredits.size / 5.0).coerceAtLeast(1.0)
-    }
-
-    private fun predictNextMonthExpenses(
-        transactions: List<ParsedTransaction>,
-        recurring: List<RecurringTransaction>
-    ): Double {
-        // Base prediction on recent spending patterns
-        val debits = transactions.filter { it.type == "debit" }
-        val recentDebits = debits.take(minOf(30, debits.size))
-        val baseExpenses = recentDebits.sumOf { it.amount }
-        
-        // Add recurring expenses expected next month
-        val recurringExpenses = recurring
-            .filter { it.frequency == "Monthly" || it.frequency == "Weekly" }
-            .sumOf { 
-                when (it.frequency) {
-                    "Weekly" -> it.averageAmount * 4
-                    "Monthly" -> it.averageAmount
-                    else -> 0.0
-                }
-            }
-        
-        // Weight between historical and recurring
-        return (baseExpenses * 0.6) + (recurringExpenses * 0.4)
-    }
-
-    private fun generateInsights(
+    private fun predictFutureBalance(
         totalIncome: Double,
         totalExpenses: Double,
-        predictedBalance: Double,
-        recurring: List<RecurringTransaction>,
-        categoryBreakdown: Map<String, CategorySpend>
-    ): List<String> {
-        val insights = mutableListOf<String>()
-        val locale = Locale.US // Fixed locale for formatting
-        
-        // Balance insight
-        if (predictedBalance > 0) {
-            insights.add("💰 Expected surplus of ₹${String.format(locale, "%.2f", predictedBalance)} next month")
-        } else {
-            insights.add("⚠️ Expected deficit of ₹${String.format(locale, "%.2f", abs(predictedBalance))} next month")
-        }
-        
-        // Savings rate
-        if (totalIncome > 0) {
-            val savingsRate = ((totalIncome - totalExpenses) / totalIncome) * 100
-            insights.add("📊 Current savings rate: ${String.format(locale, "%.1f", savingsRate)}%")
-        }
-        
-        // Top spending category
-        val topCategory = categoryBreakdown.maxByOrNull { it.value.totalSpent }
-        if (topCategory != null) {
-            insights.add("🛒 Highest spending: ${topCategory.key} (${String.format(locale, "%.1f", topCategory.value.percentageOfTotal)}%)")
-        }
-        
-        // Recurring subscriptions
-        val subscriptions = recurring.filter { it.category == "Subscription" }
-        if (subscriptions.isNotEmpty()) {
-            val subTotal = subscriptions.sumOf { it.averageAmount }
-            insights.add("🔄 ${subscriptions.size} recurring subscriptions costing ₹${String.format(locale, "%.2f", subTotal)}/month")
-        }
-        
-        // Trend warnings
-        val increasingCategories = categoryBreakdown.filter { it.value.trend == "Increasing" }
-        if (increasingCategories.isNotEmpty()) {
-            insights.add("📈 Spending increasing in: ${increasingCategories.keys.joinToString(", ")}")
-        }
-        
-        return insights
+        transactions: List<Transaction>
+    ): Double {
+        if (transactions.isEmpty()) return 0.0
+
+        val debits = transactions.filter { it.type == "debit" }
+        val credits = transactions.filter { it.type == "credit" }
+
+        // Calculate average daily income and expenses
+        val daysWithData = transactions.mapNotNull { it.date }.distinct().size
+        val avgDailyIncome = if (daysWithData > 0) credits.sumOf { it.amount } / daysWithData else 0.0
+        val avgDailyExpense = if (daysWithData > 0) debits.sumOf { it.amount } / daysWithData else 0.0
+
+        // Predict 30-day balance
+        val daysToPredict = 30
+        val predictedIncome = avgDailyIncome * daysToPredict
+        val predictedExpenses = avgDailyExpense * daysToPredict
+
+        return predictedIncome - predictedExpenses
     }
 
-    private fun calculateConfidence(transactions: List<ParsedTransaction>): String {
-        return when {
-            transactions.size >= 30 -> "High"
-            transactions.size >= 15 -> "Medium"
-            else -> "Low"
+    // Helper math functions since we can't import kotlin.math in some contexts
+    private fun Double.pow(n: Int): Double {
+        var result = 1.0
+        repeat(n) { result *= this }
+        return result
+    }
+
+    private fun sqrt(x: Double): Double {
+        if (x < 0) return 0.0
+        var guess = x / 2.0
+        for (i in 1..10) {
+            guess = (guess + x / guess) / 2.0
         }
+        return guess
     }
 }
