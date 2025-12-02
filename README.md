@@ -90,7 +90,8 @@ The app comes pre-configured with two models:
 | Model | Size | Quality | Best For |
 |-------|------|---------|----------|
 | SmolLM2 360M Q8_0 | 119 MB | Basic | Testing, quick responses |
-| Qwen 2.5 0.5B Instruct Q6_K | 374 MB | Better | General conversations |
+| Qwen 2.5 0.5B Instruct Q6_K | 374 MB | Good | General conversations |
+| Llama 3.2 1B Instruct Q6_K  | 815 MB | Better | Quality responses |
 
 ## Technical Details
 
