@@ -17,7 +17,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -33,7 +32,6 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
     val modelStatus by viewModel.modelStatus.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
-    // Auto-refresh models when screen loads
     LaunchedEffect(Unit) {
         if (availableModels.isEmpty() && !isLoading) {
             viewModel.refreshModels()
@@ -271,7 +269,6 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(availableModels) { model ->
-                        // Determine per-model downloading state & progress
                         val isDownloadingForThisModel = downloadingModelId == model.id
                         val progressForThisModel = if (isDownloadingForThisModel) downloadProgress else null
 
@@ -362,52 +359,67 @@ fun ModelItem(
                         )
                     }
                 } else {
+                    // Fixed-width Download button so it doesn't stretch the entire row
                     OutlinedButton(
                         onClick = onDownload,
                         enabled = !isDownloading,
-                        modifier = Modifier.width(140.dp)
+                        modifier = Modifier.width(140.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        if (isDownloading) {
-                            // Show determinate indicator when progress is provided
-                            if (downloadProgress != null) {
-                                CircularProgressIndicator(
-                                    progress = downloadProgress.coerceIn(0f, 1f),
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
-                                )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isDownloading) {
+                                if (downloadProgress != null) {
+                                    CircularProgressIndicator(
+                                        progress = downloadProgress.coerceIn(0f, 1f),
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Downloading")
                             } else {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
+                                Icon(
+                                    Icons.Default.Download,
+                                    contentDescription = "Download",
+                                    modifier = Modifier.size(18.dp)
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Download")
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Downloading")
-                        } else {
-                            Icon(
-                                Icons.Default.Download,
-                                contentDescription = "Download",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Download")
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
+                    // Fixed-width Load button with centered content
                     Button(
                         onClick = onLoad,
                         modifier = Modifier.width(100.dp),
-                        enabled = !isDownloading
+                        enabled = !isDownloading,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                     ) {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = "Load",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Load")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Load",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Load")
+                        }
                     }
                 }
             }

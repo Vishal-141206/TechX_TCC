@@ -9,6 +9,8 @@ import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.public.extensions.listAvailableModels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -16,7 +18,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
-import java.util.regex.Pattern
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -27,8 +28,7 @@ data class ChatMessage(
     val timestamp: String? = null
 )
 
-
-// Cash Flow Prediction data class
+// Data class for Cash Flow Prediction results
 data class CashFlowPrediction(
     val totalIncome: Double,
     val totalExpenses: Double,
@@ -53,24 +53,18 @@ class ChatViewModel : ViewModel() {
     private val _availableModels = MutableStateFlow<List<ModelInfo>>(emptyList())
     val availableModels: StateFlow<List<ModelInfo>> = _availableModels
 
-    // Keep a single global download progress (0f..1f) or null when none
     private val _downloadProgress = MutableStateFlow<Float?>(null)
     val downloadProgress: StateFlow<Float?> = _downloadProgress
 
     private val _currentModelId = MutableStateFlow<String?>(null)
     val currentModelId: StateFlow<String?> = _currentModelId
 
-    // Which model (id) is currently being downloaded (null = none)
     private val _downloadingModelId = MutableStateFlow<String?>(null)
     val downloadingModelId: StateFlow<String?> = _downloadingModelId
 
-    // Per-screen status flows (avoid a single global status string)
-    private val _modelStatus = MutableStateFlow("Initializing models...")
+    // --- Status Flows ---
+    private val _modelStatus = MutableStateFlow("Initializing...")
     val modelStatus: StateFlow<String> = _modelStatus
-
-    // Expose a generic statusMessage for existing UI that expects it.
-    // This is an alias to modelStatus so old screens continue to work.
-    val statusMessage: StateFlow<String> = _modelStatus
 
     private val _smsImportStatus = MutableStateFlow("Idle")
     val smsImportStatus: StateFlow<String> = _smsImportStatus
@@ -81,6 +75,9 @@ class ChatViewModel : ViewModel() {
     private val _predictionStatus = MutableStateFlow("Idle")
     val predictionStatus: StateFlow<String> = _predictionStatus
 
+    // alias kept for backward compatibility
+    val statusMessage: StateFlow<String> = _modelStatus
+
     // --- SMS Data State ---
     private val _smsList = MutableStateFlow<List<RawSms>>(emptyList())
     val smsList: StateFlow<List<RawSms>> = _smsList
@@ -88,15 +85,12 @@ class ChatViewModel : ViewModel() {
     private val _isImportingSms = MutableStateFlow(false)
     val isImportingSms: StateFlow<Boolean> = _isImportingSms
 
-    // Stores the RAW JSON string extracted from the SMS
     private val _parsedJsonBySms = MutableStateFlow<Map<String, String>>(emptyMap())
     val parsedJsonBySms: StateFlow<Map<String, String>> = _parsedJsonBySms
 
-    // Stores Scam Status: "safe", "likely_scam", "uncertain"
     private val _scamResultBySms = MutableStateFlow<Map<String, String>>(emptyMap())
     val scamResultBySms: StateFlow<Map<String, String>> = _scamResultBySms
 
-    // Progress for Batch Processing (0 to 100)
     private val _processingProgress = MutableStateFlow(0)
     val processingProgress: StateFlow<Int> = _processingProgress
 
@@ -107,11 +101,14 @@ class ChatViewModel : ViewModel() {
     private val _isPredicting = MutableStateFlow(false)
     val isPredicting: StateFlow<Boolean> = _isPredicting
 
+    private val _predictionProgress = MutableStateFlow(0f)
+    val predictionProgress: StateFlow<Float> = _predictionProgress
+
     private val cashFlowPredictor = CashFlowPredictor()
 
     // --- Voice Manager State ---
     private var voiceManager: VoiceManager? = null
-
+    private var appContext: Context? = null
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking
 
@@ -119,68 +116,53 @@ class ChatViewModel : ViewModel() {
         loadAvailableModels()
     }
 
-    /**
-     * Initialize voice manager (call from UI with context)
-     */
     fun initializeVoice(context: Context) {
+        // Store application context for later restart of voice coach after TTS
+        appContext = context.applicationContext
         if (voiceManager == null) {
-            // FIX: Use Application Context to prevent Memory Leaks
-            voiceManager = VoiceManager(context.applicationContext)
-            // Also try to load persisted data when context is available
-            loadParsedDataFromDisk(context.applicationContext)
+            voiceManager = VoiceManager(appContext!!)
         }
     }
 
     // ============================================================================================
-    // SECTION 1: MODEL MANAGEMENT (RunAnywhere SDK)
+    // SECTION 1: MODEL MANAGEMENT
     // ============================================================================================
 
     private fun loadAvailableModels() {
         viewModelScope.launch {
+            _isLoading.value = true
             try {
-                val models = withContext(Dispatchers.IO) {
-                    listAvailableModels()
-                }
+                val models = withContext(Dispatchers.IO) { listAvailableModels() }
                 _availableModels.value = models
-                _modelStatus.value = "Ready - Please download and load a model"
+                _modelStatus.value =
+                    if (models.isEmpty()) "No models found. Check connection." else "Ready - Please download and load a model"
             } catch (e: Exception) {
-                Log.e("ChatViewModel", "Error loading models", e)
                 _modelStatus.value = "Error loading models: ${e.message}"
+            } finally {
+                _isLoading.value = false
             }
         }
     }
 
-    /**
-     * Download a model (single active download supported).
-     * Sets _downloadingModelId so UI can show which model is downloading.
-     */
     fun downloadModel(modelId: String) {
+        if (_downloadingModelId.value != null) {
+            _modelStatus.value = "Another download is already in progress."
+            return
+        }
         viewModelScope.launch {
-            // Prevent starting a different download if one is already active
-            val currentlyDownloading = _downloadingModelId.value
-            if (currentlyDownloading != null && currentlyDownloading != modelId) {
-                _modelStatus.value = "Another model is downloading: $currentlyDownloading"
-                return@launch
-            }
-
             try {
                 _downloadingModelId.value = modelId
                 _downloadProgress.value = 0f
-                _modelStatus.value = "Downloading model $modelId..."
-
-                // RunAnywhere.downloadModel returns a Flow<Float> with progress updates (0..1)
+                _modelStatus.value = "Downloading model..."
                 RunAnywhere.downloadModel(modelId).collect { progress ->
                     _downloadProgress.value = progress
-                    _modelStatus.value = "Downloading $modelId: ${(progress * 100).toInt()}%"
+                    _modelStatus.value = "Downloading: ${(progress * 100).toInt()}%"
                 }
-
-                // Completed
-                _modelStatus.value = "Download complete! Please load the model."
+                _modelStatus.value = "Download complete!"
+                refreshModels()
             } catch (e: Exception) {
-                Log.e("ChatViewModel", "Error downloading model", e)
                 _modelStatus.value = "Download failed: ${e.message}"
             } finally {
-                // Clean up so UI doesn't think download remains active
                 _downloadProgress.value = null
                 _downloadingModelId.value = null
             }
@@ -189,534 +171,379 @@ class ChatViewModel : ViewModel() {
 
     fun loadModel(modelId: String) {
         viewModelScope.launch {
+            _isLoading.value = true
+            _modelStatus.value = "Loading model..."
             try {
-                _modelStatus.value = "Loading model..."
-                val startTime = System.currentTimeMillis()
-                val success = withContext(Dispatchers.IO) {
-                    RunAnywhere.loadModel(modelId)
-                }
-                val duration = System.currentTimeMillis() - startTime
-
+                val success = withContext(Dispatchers.IO) { RunAnywhere.loadModel(modelId) }
                 if (success) {
                     _currentModelId.value = modelId
-                    _modelStatus.value = "Model loaded in ${duration / 1000.0}s! Ready."
+                    _modelStatus.value = "Model loaded successfully!"
                 } else {
-                    _modelStatus.value = "Failed to load model"
+                    _currentModelId.value = null
+                    _modelStatus.value = "Failed to load model."
                 }
             } catch (e: Exception) {
-                Log.e("ChatViewModel", "Error loading model", e)
                 _modelStatus.value = "Error loading model: ${e.message}"
-            }
-        }
-    }
-
-    fun refreshModels() {
-        loadAvailableModels()
-    }
-
-    // ============================================================================================
-    // SECTION 2: CHAT INTERFACE
-    // ============================================================================================
-
-    fun sendMessage(text: String) {
-        // guard: nothing to send
-        if (text.isBlank()) return
-
-        // 1) require model loaded
-        val modelId = _currentModelId.value
-        if (modelId == null) {
-            _modelStatus.value = "Please load a model first"
-            _messages.update { current ->
-                current + ChatMessage(
-                    text = "Error: no model loaded. Open Model Management to load one.",
-                    isUser = false,
-                    timestamp = getCurrentTimestamp()
-                )
-            }
-            return
-        }
-
-        // Append user message immediately with timestamp
-        _messages.update { current ->
-            current + ChatMessage(
-                text = text,
-                isUser = true,
-                timestamp = getCurrentTimestamp()
-            )
-        }
-
-        viewModelScope.launch {
-            _isLoading.value = true
-            var assistantResponse = ""
-
-            try {
-                _modelStatus.value = "Generating..."
-
-                // Try streaming tokens with timeout (30s)
-                val streamed = withTimeoutOrNull(30_000L) {
-                    var acc = ""
-                    RunAnywhere.generateStream(text).collect { token ->
-                        acc += token
-                        // update UI incrementally
-                        _messages.update { current ->
-                            val newList = current.toMutableList()
-                            if (newList.lastOrNull()?.isUser == false) {
-                                // Update last assistant message
-                                newList[newList.lastIndex] = newList.last().copy(text = acc)
-                            } else {
-                                // Add new assistant message
-                                newList.add(ChatMessage(
-                                    text = acc,
-                                    isUser = false,
-                                    timestamp = getCurrentTimestamp()
-                                ))
-                            }
-                            newList
-                        }
-                    }
-                    acc
-                }
-
-                if (!streamed.isNullOrBlank()) {
-                    assistantResponse = streamed.trim()
-                    _modelStatus.value = "Generation complete"
-                } else {
-                    // fallback: try non-streaming generate call or final attempt
-                    _modelStatus.value = "No streamed tokens received — trying fallback..."
-                    try {
-                        var fallback = ""
-                        withTimeoutOrNull(20_000L) {
-                            RunAnywhere.generateStream(text).collect { t -> fallback += t }
-                        }
-                        if (!fallback.isNullOrBlank()) {
-                            assistantResponse = fallback.trim()
-                            _modelStatus.value = "Generation (fallback) complete"
-                        } else {
-                            assistantResponse = "Error: model produced no output."
-                            _modelStatus.value = "Model produced no output"
-                        }
-                    } catch (e: Exception) {
-                        assistantResponse = "Error: generation fallback failed: ${e.message}"
-                        _modelStatus.value = "Generation failed"
-                        Log.e("ChatViewModel", "Fallback generation error", e)
-                    }
-                }
-
-                // Ensure UI contains the final assistant response
-                if (assistantResponse.isNotEmpty()) {
-                    _messages.update { current ->
-                        val newList = current.toMutableList()
-                        if (newList.lastOrNull()?.isUser == false) {
-                            newList[newList.lastIndex] = newList.last().copy(text = assistantResponse)
-                        } else {
-                            newList.add(ChatMessage(
-                                text = assistantResponse,
-                                isUser = false,
-                                timestamp = getCurrentTimestamp()
-                            ))
-                        }
-                        newList
-                    }
-                }
-
-            } catch (e: Throwable) {
-                // Log and surface safe error
-                Log.e("ChatViewModel", "sendMessage error: ${e.message}", e)
-                _messages.update { current ->
-                    current + ChatMessage(
-                        text = "Error: ${e.message ?: "Unknown error during generation"}",
-                        isUser = false,
-                        timestamp = getCurrentTimestamp()
-                    )
-                }
-                _modelStatus.value = "Generation failed: ${e.message ?: "unknown"}"
             } finally {
                 _isLoading.value = false
             }
         }
     }
 
-    private fun getCurrentTimestamp(): String {
-        val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-        return sdf.format(Date())
-    }
+    fun refreshModels() = loadAvailableModels()
 
     // ============================================================================================
-    // SECTION 3: SMS IMPORT & BATCH PROCESSING
+    // SECTION 2: CHAT
+    // ============================================================================================
+
+    /**
+     * Send a user message to the model.
+     * If speakResponse==true, the assistant's final reply will be spoken via VoiceManager.
+     */
+    /**
+     * Send a text prompt to the model and stream back the assistant reply.
+     * If speakResponse==true, the final assistant reply is spoken by VoiceManager.
+     */
+    fun sendMessage(text: String, speakResponse: Boolean = false) {
+        if (_currentModelId.value == null) {
+            _messages.update { it + ChatMessage("Error: No AI model is loaded.", false) }
+            return
+        }
+        // add user message to UI
+        _messages.update { it + ChatMessage(text, true, getCurrentTimestamp()) }
+
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                var fullResponse = ""
+                // stream tokens (30s timeout)
+                withTimeoutOrNull(30_000L) {
+                    RunAnywhere.generateStream(text).collect { token ->
+                        fullResponse += token
+                        // update partial assistant response in-place
+                        _messages.update { current ->
+                            val m = current.toMutableList()
+                            // if last message is assistant, replace it; else append new assistant message
+                            if (m.lastOrNull()?.isUser == false) {
+                                m[m.lastIndex] = m.last().copy(text = fullResponse)
+                            } else {
+                                m.add(ChatMessage(fullResponse, false, getCurrentTimestamp()))
+                            }
+                            m.toList()
+                        }
+                    }
+                }
+
+                // At this point fullResponse contains the final assistant text (or empty if timed out).
+                // If user requested TTS for the response (voice coach), speak it.
+                if (speakResponse) {
+                    val responseTrim = fullResponse.trim()
+                    if (responseTrim.isNotEmpty()) {
+                        // ensure voice manager exists
+                        initializeVoice(appContext ?: return@launch)
+
+                        // Stop model ASR to avoid feedback
+                        voiceManager?.stopListening()
+                        _isSpeaking.value = true
+
+                        // Speak and after completion, restart listening if the voice coach is still expected.
+                        voiceManager?.speak(responseTrim) {
+                            // called on main thread by VoiceManager
+                            _isSpeaking.value = false
+
+                            // Restart voice listening only if voice coach was active before and appContext is present
+                            // We avoid infinite loop by small delay and re-checking _isVoiceListening flag.
+                            viewModelScope.launch {
+                                delay(300L)
+                                // If voice coach mode is still desired and permission ok, restart.
+                                if (_isVoiceListening.value) {
+                                    appContext?.let { ctx ->
+                                        // startVoiceCoach will check permission and set states; it will attempt to start ASR again
+                                        startVoiceCoach(ctx)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                _messages.update { it + ChatMessage("Error: ${e.message}", false) }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+
+    // ============================================================================================
+    // SECTION 3: SMS PROCESSING (ROBUST & PARALLEL)
     // ============================================================================================
 
     fun importSms(context: Context) {
         viewModelScope.launch {
             _isImportingSms.value = true
             _smsImportStatus.value = "Reading inbox..."
-
-            val list = withContext(Dispatchers.IO) {
-                try {
-                    // Look back 365 days for better prediction data
-                    readSmsInbox(context, limit = 3000, daysLookBack = 365)
-                } catch (e: Exception) {
-                    Log.e("ChatViewModel", "Error reading SMS", e)
-                    emptyList()
-                }
+            try {
+                val sms = withContext(Dispatchers.IO) { readSmsInbox(context, daysLookBack = 30) }
+                _smsList.value = sms
+                _smsImportStatus.value = "Imported ${sms.size} financial messages."
+            } catch (e: Exception) {
+                _smsImportStatus.value = "Error importing SMS: ${e.message}"
+            } finally {
+                _isImportingSms.value = false
             }
-
-            _smsList.value = list
-            _smsImportStatus.value = "Imported ${list.size} financial messages."
-            _isImportingSms.value = false
         }
     }
 
+    // --- Robust batch processor ---
     fun processAllMessages() {
-        val allMessages = _smsList.value
-        if (allMessages.isEmpty()) {
+        val messagesToProcess = _smsList.value
+        if (messagesToProcess.isEmpty()) {
             _batchProcessingStatus.value = "No messages to process."
             return
         }
 
         viewModelScope.launch {
-            _batchProcessingStatus.value = "Batch processing ${allMessages.size} messages..."
-            val total = allMessages.size
+            _batchProcessingStatus.value = "Starting batch processing..."
             _processingProgress.value = 0
+            val total = messagesToProcess.size
             var processedCount = 0
 
-            // Run batch processing on IO with parallel chunks
-            withContext(Dispatchers.IO) {
-                // Chunk size 20 to balance speed and resource usage
-                allMessages.chunked(20).forEach { chunk ->
-                    chunk.map { sms ->
-                        async {
-                            // 1. Parse if not present
-                            if (!_parsedJsonBySms.value.containsKey(sms.id)) {
-                                internalParseSms(sms.id, sms.body ?: "")
-                            }
-                            // 2. Check Scam (Heuristic first)
-                            if (shouldCheckForScam(sms.body)) {
-                                internalDetectScam(sms.id, sms.body ?: "")
-                            }
-                        }
-                    }.forEach { it.await() } // Wait for chunk
-
-                    processedCount += chunk.size
-                    _processingProgress.value = (processedCount * 100) / total
-                    _batchProcessingStatus.value = "Processed $processedCount / $total messages..."
+            // Pre-mark as checking
+            _scamResultBySms.update { current ->
+                val m = current.toMutableMap()
+                messagesToProcess.forEach { sms ->
+                    val cur = m[sms.id]
+                    if (cur == null || cur.equals("Not checked", ignoreCase = true)) {
+                        m[sms.id] = "Checking..."
+                    }
                 }
+                m.toMap()
             }
 
-            // Save progress to disk implicitly via predict call or manual
-            predictCashFlow()
-            _batchProcessingStatus.value = "Batch Processing Complete."
-            _processingProgress.value = 0
+            try {
+                val jobs = messagesToProcess.map { sms ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val parsedExists = _parsedJsonBySms.value.containsKey(sms.id)
+                            if (!parsedExists || _parsedJsonBySms.value[sms.id]?.contains("error") == true) {
+                                internalParseSms(sms.id, sms.body ?: "")
+                            }
+
+                            if (shouldCheckForScam(sms.body) || _scamResultBySms.value[sms.id].isNullOrBlank() ||
+                                _scamResultBySms.value[sms.id] == "Checking...") {
+                                internalDetectScam(sms.id, sms.body ?: "")
+                            }
+
+                        } catch (e: Exception) {
+                            Log.e("ChatViewModel", "processAllMessages item error for ${sms.id}: ${e.message}", e)
+                            _scamResultBySms.update { current ->
+                                val m = current.toMutableMap()
+                                m[sms.id] = "error"
+                                m.toMap()
+                            }
+                        } finally {
+                            synchronized(this) {
+                                processedCount++
+                                _processingProgress.value = (processedCount * 100) / total
+                                _batchProcessingStatus.value = "Processed $processedCount / $total messages..."
+                            }
+                        }
+                    }
+                }
+
+                jobs.awaitAll()
+
+                ensureAllScamStatusesResolved()
+
+                _batchProcessingStatus.value = "Batch processing complete!"
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "processAllMessages failed: ${e.message}", e)
+                _batchProcessingStatus.value = "Error during batch processing: ${e.message}"
+            } finally {
+                _processingProgress.value = 0
+            }
         }
     }
 
-    private fun shouldCheckForScam(body: String?): Boolean {
-        if (body == null) return false
-        val lower = body.lowercase()
-        return lower.contains("otp") || lower.contains("http") || lower.contains("click") ||
-                lower.contains("call") || lower.contains("kyc") || lower.contains("urgent") ||
-                lower.contains("verify") || lower.contains("password") || lower.contains("login")
+    private fun ensureAllScamStatusesResolved() {
+        _scamResultBySms.update { current ->
+            val m = current.toMutableMap()
+            var changed = false
+            for (key in m.keys.toList()) {
+                val v = m[key]
+                if (v == null || v.equals("Not checked", ignoreCase = true) || v.equals("Checking...", ignoreCase = true)) {
+                    m[key] = "uncertain"
+                    changed = true
+                }
+            }
+            _smsList.value.forEach { sms ->
+                if (!m.containsKey(sms.id)) {
+                    m[sms.id] = "uncertain"
+                    changed = true
+                }
+            }
+            if (changed) m.toMap() else current
+        }
     }
 
-    // ============================================================================================
-    // SECTION 4: AI PARSING & STRUCTURED OUTPUT
-    // ============================================================================================
-
-    private val extractionPromptTemplate = """
-        You are a strict JSON extractor. Input: a single bank/payment SMS in English. Output: ONLY a single JSON object between BEGIN_JSON and END_JSON tags. The JSON must have keys:
-        amount (number or null), currency ("INR"), merchant (string or null), type ("debit"|"credit"|"info"), date (YYYY-MM-DD or null), account_tail (string or null), balance (number or null), raw_text (original message).
-    
-        Return valid JSON ONLY. NOTHING else. Examples follow.
-        Example 1:
-        SMS: "HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."
-        JSON:
-        BEGIN_JSON
-        {"amount":1250,"currency":"INR","merchant":"AMAZON PAY","type":"debit","date":"2025-11-26","account_tail":null,"balance":5000,"raw_text":"HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."}
-        END_JSON
-    
-        Example 2:
-        SMS: "SBI: Credited Rs. 10,000.00 via NEFT. Ref 12345."
-        JSON:
-        BEGIN_JSON
-        {"amount":10000,"currency":"INR","merchant":null,"type":"credit","date":null,"account_tail":null,"balance":null,"raw_text":"SBI: Credited Rs. 10,000.00 via NEFT. Ref 12345."}
-        END_JSON
-    
-        Now parse this SMS (return ONLY one JSON between BEGIN_JSON and END_JSON):
-    """.trimIndent()
+    // ---------------------------------------------------------
+    // Individual Message Actions (Called from UI)
+    // ---------------------------------------------------------
 
     fun parseSms(smsId: String, smsBody: String) {
         viewModelScope.launch {
+            _parsedJsonBySms.update { current ->
+                val m = current.toMutableMap()
+                m[smsId] = "Parsing..."
+                m.toMap()
+            }
             internalParseSms(smsId, smsBody)
         }
     }
 
-    private suspend fun internalParseSms(smsId: String, smsBody: String) {
-        // 1. Try AI Model if loaded
-        if (_currentModelId.value != null) {
-            try {
-                val prompt = buildString {
-                    append(extractionPromptTemplate)
-                    append("\n\nSMS: \"${smsBody.replace("\"", "\\\"")}\"\n")
-                    append("JSON:\n")
-                    append("BEGIN_JSON\n")
-                }
-
-                var streamed = ""
-                // 30s timeout is safer for batch processing
-                val result = withTimeoutOrNull(30000L) {
-                    var acc = ""
-                    RunAnywhere.generateStream(prompt).collect { token ->
-                        acc += token
-                    }
-                    acc
-                } ?: ""
-
-                val finalText = prompt + streamed
-                val beginIdx = finalText.indexOf("BEGIN_JSON")
-                val endIdx = finalText.indexOf("END_JSON", beginIdx)
-
-                val parsedResult = if (beginIdx >= 0 && endIdx > beginIdx) {
-                    finalText.substring(beginIdx + "BEGIN_JSON".length, endIdx).trim()
-                } else {
-                    extractFirstJsonObject(streamed) ?: quickHeuristicJson(smsBody)
-                }
-
-                // Update parsed map safely (produce new map snapshot)
-                _parsedJsonBySms.update { current ->
-                    current + (smsId to parsedResult)
-                }
-                return
-
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "AI Parse failed, using heuristic: ${e.message}")
+    fun detectScam(smsId: String, smsBody: String) {
+        viewModelScope.launch {
+            _scamResultBySms.update { current ->
+                val m = current.toMutableMap()
+                m[smsId] = "Checking..."
+                m.toMap()
             }
-        }
-
-        // 2. Fallback to Heuristic (Regex)
-        val heuristic = quickHeuristicJson(smsBody)
-        _parsedJsonBySms.update { current ->
-            current + (smsId to heuristic)
+            internalDetectScam(smsId, smsBody)
         }
     }
 
-    private val scamPromptTemplate = """
-        You are a scam detector. Input: a financial SMS text. Output: return exactly one word: safe, likely_scam, or uncertain. 
-        Use "likely_scam" if the message requests OTP, links, asks to call a number for payments, or has suspicious phrasing.
-        Examples:
-        "Your OTP is 1234" -> likely_scam
-        "HDFC: Debited Rs 1000 at Amazon" -> safe
-        "URGENT: Your KYC is expired. Click here" -> likely_scam
-        Now classify:
-    """.trimIndent()
+    fun forceSaveParsedJson(smsId: String, newJson: String) {
+        _parsedJsonBySms.update { current ->
+            val m = current.toMutableMap()
+            m[smsId] = newJson
+            m.toMap()
+        }
+    }
 
-    fun detectScam(smsId: String, smsBody: String) {
-        viewModelScope.launch { internalDetectScam(smsId, smsBody) }
+    // ============================================================================================
+    // SECTION 4: AI PARSING & SCAM (INTERNAL HELPERS)
+    // ============================================================================================
+
+    private suspend fun internalParseSms(smsId: String, smsBody: String) {
+        if (smsBody.isBlank()) return
+
+        val prompt = buildString {
+            append(
+                "You are a strict JSON extractor. Input: a single bank/payment SMS in English. " +
+                        "Output: ONLY a single JSON object with keys: amount (number or null), currency ('INR'), merchant (string or null), type ('debit'|'credit'|'info'), date (YYYY-MM-DD or null), account_tail (string or null), balance (number or null). Use null for missing values.\n\n"
+            )
+            append("SMS: \"$smsBody\"\nJSON:")
+        }
+
+        try {
+            val result = withTimeoutOrNull(30_000L) {
+                var acc = ""
+                RunAnywhere.generateStream(prompt).collect { token -> acc += token }
+                acc
+            } ?: ""
+
+            val parsedJson = extractFirstJsonObject(result) ?: quickHeuristicJson(smsBody)
+
+            _parsedJsonBySms.update { current ->
+                val m = current.toMutableMap()
+                m[smsId] = parsedJson
+                m.toMap()
+            }
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "internalParseSms error: ${e.message}", e)
+            _parsedJsonBySms.update { current ->
+                val m = current.toMutableMap()
+                m[smsId] = "{\"error\": \"${e.message ?: "parse failed"}\"}"
+                m.toMap()
+            }
+        }
     }
 
     private suspend fun internalDetectScam(smsId: String, smsBody: String) {
-        if (_currentModelId.value == null) {
-            // Simple keyword fallback
-            val lower = smsBody.lowercase()
-            val fallback = when {
-                lower.contains("otp") || lower.contains("link") || lower.contains("kyc") ||
-                        lower.contains("urgent") || lower.contains("verify now") -> "likely_scam"
-                lower.contains("debited") || lower.contains("credited") ||
-                        lower.contains("balance") || lower.contains("transaction") -> "safe"
-                else -> "uncertain"
-            }
+        if (smsBody.isBlank()) {
             _scamResultBySms.update { current ->
-                current + (smsId to fallback)
+                val m = current.toMutableMap()
+                m[smsId] = "uncertain"
+                m.toMap()
             }
             return
         }
 
-        // Mark as checking so UI can show progress per-sms if desired
-        _scamResultBySms.update { current ->
-            current + (smsId to "Checking...")
-        }
-
-        try {
-            val prompt = "$scamPromptTemplate\n\nSMS: \"${smsBody.replace("\"", "\\\"")}\"\nAnswer:"
-            var label = ""
-            withTimeoutOrNull(10000L) {
-                RunAnywhere.generateStream(prompt).collect { token ->
-                    label += token
-                }
-            }
-            val cleanLabel = label.trim().lowercase().replace(".", "")
-            val finalLabel = when {
-                cleanLabel.contains("likely_scam") -> "likely_scam"
-                cleanLabel.contains("safe") -> "safe"
+        if (_currentModelId.value == null) {
+            val fallback = when {
+                smsBody.contains("otp", true) || smsBody.contains("click", true) || smsBody.contains("http", true) -> "likely_scam"
+                smsBody.contains("debited", true) || smsBody.contains("credited", true) -> "safe"
                 else -> "uncertain"
             }
             _scamResultBySms.update { current ->
-                current + (smsId to finalLabel)
+                val m = current.toMutableMap()
+                m[smsId] = fallback
+                m.toMap()
+            }
+            return
+        }
+
+        try {
+            _scamResultBySms.update { current ->
+                val m = current.toMutableMap()
+                m[smsId] = "Checking..."
+                m.toMap()
+            }
+
+            val prompt = """
+            You are a financial scam detector. Output EXACTLY one word: safe, likely_scam, or uncertain.
+            SMS: "$smsBody"
+        """.trimIndent()
+
+            val result = withTimeoutOrNull(10_000L) {
+                var acc = ""
+                RunAnywhere.generateStream(prompt).collect { acc += it }
+                acc
+            } ?: ""
+
+            val cleaned = result.trim().lowercase(Locale.getDefault())
+
+            val finalLabel = when {
+                cleaned.contains("likely_scam") -> "likely_scam"
+                cleaned.contains("safe") -> "safe"
+                cleaned.contains("uncertain") -> "uncertain"
+                else -> {
+                    when {
+                        smsBody.contains("otp", true) || smsBody.contains("click", true) || smsBody.contains("http", true) -> "likely_scam"
+                        smsBody.contains("debited", true) || smsBody.contains("credited", true) -> "safe"
+                        else -> "uncertain"
+                    }
+                }
+            }
+
+            _scamResultBySms.update { current ->
+                val m = current.toMutableMap()
+                m[smsId] = finalLabel
+                m.toMap()
             }
         } catch (e: Exception) {
-            Log.e("ChatViewModel", "Error detecting scam", e)
+            Log.e("ChatViewModel", "internalDetectScam error for $smsId: ${e.message}", e)
             _scamResultBySms.update { current ->
-                current + (smsId to "error")
+                val m = current.toMutableMap()
+                m[smsId] = "error"
+                m.toMap()
             }
         }
     }
 
-    fun forceSaveParsedJson(smsId: String, json: String) {
-        _parsedJsonBySms.update { current ->
-            current + (smsId to json)
-        }
-    }
-
-    // ============================================================================================
-    // SECTION 5: CASH FLOW
-    // ============================================================================================
-
-    fun predictCashFlow() {
-        if (_isPredicting.value) return
-
-        viewModelScope.launch {
-            _isPredicting.value = true
-            _predictionStatus.value = "Predicting cash flow..."
-            try {
-                val smsMap = _smsList.value.associateBy { it.id }
-                val prediction = cashFlowPredictor.predictCashFlow(_parsedJsonBySms.value, smsMap)
-                _cashFlowPrediction.value = prediction
-                _predictionStatus.value = "Prediction complete!"
-
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "Error predicting cash flow", e)
-                _predictionStatus.value = "Prediction failed: ${e.message}"
-            }
-            _isPredicting.value = false
-        }
-    }
-
-    // ============================================================================================
-    // SECTION 6: VOICE
-    // ============================================================================================
-
-    fun speakCashFlowSummary() {
-        val prediction = _cashFlowPrediction.value ?: return
-        voiceManager?.let { vm ->
-            _isSpeaking.value = true
-            // Use the generator to create the string, then speak it
-            val text = vm.generateVoiceSummary(prediction)
-            vm.speak(text) {
-                _isSpeaking.value = false
-            }
-        } ?: run {
-            _modelStatus.value = "Voice manager not initialized"
-        }
-    }
-
-    fun speakTransactionStats() {
-        val totalDebits = _smsList.value.sumOf { sms ->
-            _parsedJsonBySms.value[sms.id]?.let { json ->
-                try {
-                    val obj = JSONObject(json)
-                    val type = obj.optString("type")
-                    if (type == "debit") obj.optDouble("amount", 0.0) else 0.0
-                } catch (_: Exception) { 0.0 }
-            } ?: 0.0
-        }
-        val totalCredits = _smsList.value.sumOf { sms ->
-            _parsedJsonBySms.value[sms.id]?.let { json ->
-                try {
-                    val obj = JSONObject(json)
-                    val type = obj.optString("type")
-                    if (type == "credit") obj.optDouble("amount", 0.0) else 0.0
-                } catch (_: Exception) { 0.0 }
-            } ?: 0.0
-        }
-
-        voiceManager?.let { vm ->
-            _isSpeaking.value = true
-            val summary = vm.generateTransactionSummary(_smsList.value.size, totalDebits, totalCredits)
-            vm.speak(summary) {
-                _isSpeaking.value = false
-            }
-        } ?: run {
-            _modelStatus.value = "Voice manager not initialized"
-        }
-    }
-
-    fun speakScamResults() {
-        val scamResults = _scamResultBySms.value
-        val scamCount = scamResults.values.count { it.contains("likely_scam", ignoreCase = true) }
-
-        voiceManager?.let { vm ->
-            _isSpeaking.value = true
-            val alert = vm.generateScamAlert(scamCount)
-            vm.speak(alert) {
-                _isSpeaking.value = false
-            }
-        } ?: run {
-            _modelStatus.value = "Voice manager not initialized"
-        }
-    }
-
-    fun stopSpeaking() {
-        voiceManager?.stop()
-        _isSpeaking.value = false
-    }
-
-    // ============================================================================================
-    // SECTION 7: PERSISTENCE & UTILITIES
-    // ============================================================================================
-
-    // Load data from internal storage to persist analysis across app restarts
-    private fun loadParsedDataFromDisk(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val file = context.getFileStreamPath("parsed_sms_cache.json")
-                if (file.exists()) {
-                    val jsonString = context.openFileInput("parsed_sms_cache.json").bufferedReader().use { it.readText() }
-                    val jsonObject = JSONObject(jsonString)
-                    val map = mutableMapOf<String, String>()
-                    val keys = jsonObject.keys()
-                    while(keys.hasNext()) {
-                        val key = keys.next()
-                        map[key] = jsonObject.getString(key)
-                    }
-                    _parsedJsonBySms.value = map
-                    Log.d("ChatViewModel", "Loaded ${map.size} parsed items from disk.")
-                }
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "Failed to load cache: ${e.message}")
-            }
-        }
-    }
-
-    // Helper to find JSON block in AI text
-    private fun extractFirstJsonObject(text: String): String? {
-        var depth = 0
-        var start = -1
-        for (i in text.indices) {
-            when (text[i]) {
-                '{' -> {
-                    if (depth == 0) start = i
-                    depth++
-                }
-                '}' -> {
-                    depth--
-                    if (depth == 0 && start != -1) {
-                        return text.substring(start, i + 1)
-                    }
-                }
-            }
-        }
-        return null
-    }
-
-    // Fast Regex fallback for when AI is loading or fails
+    // Fast Regex fallback for when AI is unavailable / fails
     private suspend fun quickHeuristicJson(sms: String): String = withContext(Dispatchers.Default) {
-        val amountPattern = Pattern.compile("(?i)(?:INR|Rs\\.?|₹)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)")
-        val balPattern = Pattern.compile("(?i)(?:Avl Bal|Available balance|Bal(?:ance)?:)\\s*(?:INR|Rs\\.?|₹)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)")
-        val datePattern = Pattern.compile("\\b(\\d{2}[/-]\\d{2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2})\\b")
-        val acctPattern = Pattern.compile("(?i)(?:a/c|acct|account|ending|xx)\\s*[:#]?\\s*([0-9A-Za-z]+)")
+        // Basic heuristics (similar to earlier implementation)
+        val amountPattern = Regex("(?i)(?:INR|Rs\\.?|₹)\\s*([0-9,]+(?:\\.[0-9]{1,2})?)")
+        val balPattern = Regex("(?i)(?:Avl Bal|Available balance|Bal(?:ance)?:)\\s*(?:INR|Rs\\.?|₹)?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)")
+        val datePattern = Regex("\\b(\\d{2}[/-]\\d{2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2})\\b")
+        val acctPattern = Regex("(?i)(?:a/c|acct|account|ending|xx)\\s*[:#]?\\s*([0-9A-Za-z]+)")
 
-        val amount = amountPattern.matcher(sms).let { if (it.find()) it.group(1) else null }
-        val balance = balPattern.matcher(sms).let { if (it.find()) it.group(1) else null }
-        val date = datePattern.matcher(sms).let { if (it.find()) it.group(1) else null }
-        val acct = acctPattern.matcher(sms).let { if (it.find()) it.group(1) else null }
+        val amount = amountPattern.find(sms)?.groups?.get(1)?.value
+        val balance = balPattern.find(sms)?.groups?.get(1)?.value
+        val date = datePattern.find(sms)?.groups?.get(1)?.value
+        val acct = acctPattern.find(sms)?.groups?.get(1)?.value
 
         fun cleanNum(s: String?): Number? {
             if (s == null) return null
@@ -730,17 +557,21 @@ class ChatViewModel : ViewModel() {
 
         val amtNum = cleanNum(amount)
         val balNum = cleanNum(balance)
-        val type = if (sms.contains("credit", true) || sms.contains("credited", true)) "credit"
-        else if (sms.contains("debit", true) || sms.contains("debited", true)) "debit"
-        else "info"
 
-        // Attempt simple merchant extraction
+        val type = when {
+            sms.contains("credit", true) || sms.contains("credited", true) -> "credit"
+            sms.contains("debit", true) || sms.contains("debited", true) -> "debit"
+            else -> "info"
+        }
+
         var merchant: String? = null
         if (type == "debit" && sms.contains(" at ", true)) {
-            merchant = sms.substringAfterLast(" at ").substringBefore(".").take(25).trim()
+            merchant = sms.substringAfterLast(" at ").substringBefore(".").take(30).trim()
         } else if (type == "debit" && sms.contains(" to ", true)) {
-            merchant = sms.substringAfterLast(" to ").substringBefore(".").take(25).trim()
+            merchant = sms.substringAfterLast(" to ").substringBefore(".").take(30).trim()
         }
+
+        val dateIso = date?.let { normalizeDateToIso(it) }
 
         return@withContext buildString {
             append("{")
@@ -748,7 +579,7 @@ class ChatViewModel : ViewModel() {
             append("\"currency\":\"INR\",")
             append("\"merchant\":${if (merchant != null) "\"${merchant.replace("\"", "\\\"")}\"" else "null"},")
             append("\"type\":\"$type\",")
-            append("\"date\":${if (date != null) "\"${normalizeDate(date)}\"" else "null"},")
+            append("\"date\":${if (dateIso != null) "\"${dateIso}\"" else "null"},")
             append("\"account_tail\":${if (acct != null) "\"$acct\"" else "null"},")
             append("\"balance\":${balNum ?: "null"},")
             append("\"raw_text\":\"${sms.replace("\"", "\\\"").replace("\n", " ")}\"")
@@ -756,24 +587,329 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    private fun normalizeDate(s: String): String {
-        if (s.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) return s
-        val parts = s.split('/', '-')
-        return try {
+    private fun normalizeDateToIso(s: String): String? {
+        try {
+            val trimmed = s.trim()
+            if (trimmed.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) return trimmed
+            val parts = trimmed.split('/', '-')
             if (parts.size == 3) {
                 var d = parts[0]
-                val m = parts[1]
+                var m = parts[1]
                 var y = parts[2]
                 if (y.length == 2) y = "20$y"
-                // Swap if likely MM/DD/YYYY based on day > 12? Assuming DD/MM for India
-                String.format("%04d-%02d-%02d", y.toInt(), m.toInt(), d.toInt())
-            } else s
-        } catch (_: Exception) { s }
+                val dd = d.padStart(2, '0').toIntOrNull() ?: return null
+                val mm = m.padStart(2, '0').toIntOrNull() ?: return null
+                val yy = y.padStart(4, '0').toIntOrNull() ?: return null
+                return String.format(Locale.getDefault(), "%04d-%02d-%02d", yy, mm, dd)
+            }
+        } catch (_: Exception) { }
+        return null
     }
 
-    // Cleanup resources
+    // Helper to extract JSON object from text using brace matching
+    private fun extractFirstJsonObject(text: String): String? {
+        val startIndex = text.indexOf('{')
+        if (startIndex == -1) return null
+        var braceCount = 1
+        for (i in (startIndex + 1) until text.length) {
+            when (text[i]) {
+                '{' -> braceCount++
+                '}' -> braceCount--
+            }
+            if (braceCount == 0) {
+                return text.substring(startIndex, i + 1)
+            }
+        }
+        return null
+    }
+
+    private fun getCurrentTimestamp(): String {
+        return SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+    }
+
+    private fun shouldCheckForScam(body: String?): Boolean {
+        if (body == null) return false
+        val lower = body.lowercase()
+        return lower.contains("otp") || lower.contains("http") || lower.contains("click") || lower.contains("call") || lower.contains("urgent")
+    }
+
+    // Put these inside ChatViewModel
+
+    // Helper wrapper: runs the model stream, collects tokens, and retries once with a stricter prompt if result is empty.
+// Returns final string (may be empty).
+    private suspend fun callModelWithRetries(userPrompt: String, maxWaitMs: Long = 45000L): String {
+        // Primary attempt: normal prompt
+        suspend fun runStream(prompt: String, timeoutMs: Long): String {
+            var acc = ""
+            try {
+                withTimeoutOrNull(timeoutMs) {
+                    RunAnywhere.generateStream(prompt).collect { token ->
+                        acc += token
+                    }
+                }
+            } catch (e: Exception) {
+                // keep acc and return (outer code will handle empty)
+            }
+            return acc.trim()
+        }
+
+        // 1) Normal attempt
+        val primary = runStream(userPrompt, maxWaitMs)
+
+        if (primary.isNotBlank()) {
+            // quick sanity: return as-is
+            android.util.Log.d("ChatViewModel", "Model primary response length=${primary.length}")
+            return primary
+        }
+
+        // 2) Retry with stricter prompt (deterministic hint + ask for short answer only)
+        val strictPrompt = buildString {
+            appendLine("STRICT OUTPUT: Answer concisely. Do NOT add any commentary or explanation.")
+            appendLine("If you are giving a multi-sentence answer, keep it to the essential facts.")
+            appendLine()
+            appendLine("User prompt:")
+            appendLine(userPrompt)
+            appendLine()
+            appendLine("REPLY:")
+        }
+
+        android.util.Log.w("ChatViewModel", "Primary model response empty — retrying with strict prompt")
+        val retry = runStream(strictPrompt, maxWaitMs / 2) // shorter retry timeout
+        if (retry.isNotBlank()) {
+            android.util.Log.d("ChatViewModel", "Model retry response length=${retry.length}")
+            return retry
+        }
+
+        // 3) final fallback - empty result but return empty string so callers can handle fallback heuristics
+        android.util.Log.e("ChatViewModel", "Model returned empty on both attempts")
+        return ""
+    }
+
+    // Robust sendMessage which streams partial tokens and retries/fallbacks when empty
+    fun sendMessage(text: String) {
+        if (_currentModelId.value == null) {
+            _messages.update { it + ChatMessage("Error: No AI model is loaded.", false) }
+            return
+        }
+        // push user message
+        _messages.update { it + ChatMessage(text, true, getCurrentTimestamp()) }
+
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                // Build your full prompt (system/role + user) if you use one. Small example:
+                val prompt = buildString {
+                    appendLine("You are a helpful, precise financial assistant. Be concise and factual.")
+                    appendLine()
+                    appendLine("User: $text")
+                }
+
+                // call wrapper that handles retries
+                val finalResponse = callModelWithRetries(prompt, maxWaitMs = 45000L)
+
+                if (finalResponse.isBlank()) {
+                    // fallback behavior: show polite failure + suggest action
+                    val fallback = "Sorry — I couldn't get a response from the model. Try again or load a different model."
+                    _messages.update { it + ChatMessage(fallback, false, getCurrentTimestamp()) }
+                } else {
+                    // If the model returned content, update messages.
+                    _messages.update { current ->
+                        val m = current.toMutableList()
+                        // If streaming partial assistant already exists, replace it; otherwise append
+                        if (m.lastOrNull()?.isUser == false) {
+                            m[m.lastIndex] = m.last().copy(text = finalResponse, timestamp = getCurrentTimestamp())
+                        } else {
+                            m.add(ChatMessage(finalResponse, false, getCurrentTimestamp()))
+                        }
+                        m.toList()
+                    }
+                }
+            } catch (e: Exception) {
+                _messages.update { it + ChatMessage("Error: ${e.message}", false, getCurrentTimestamp()) }
+                android.util.Log.e("ChatViewModel", "sendMessage exception: ${e.message}", e)
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+
+
+
+    // ============================================================================================
+    // SECTION 5: CASH FLOW PREDICTION (ROBUST)
+    // ============================================================================================
+
+    fun predictCashFlow() {
+        if (_isPredicting.value) return
+
+        viewModelScope.launch {
+            _isPredicting.value = true
+            _cashFlowPrediction.value = null // Clear old prediction
+            _predictionProgress.value = 0f
+            _predictionStatus.value = "Starting prediction..."
+
+            try {
+                val validTransactions = _parsedJsonBySms.value.values.count { it.contains("amount") }
+                if (validTransactions < 5) {
+                    _predictionStatus.value = "Error: Not enough transaction data. Please parse more SMS."
+                    delay(3000)
+                    _predictionStatus.value = "Idle"
+                    return@launch
+                }
+
+                val parsedSnapshot = _parsedJsonBySms.value
+                val smsMap = _smsList.value.associateBy { it.id }
+
+                val prediction = withContext(Dispatchers.Default) {
+                    cashFlowPredictor.predictCashFlow(parsedSnapshot, smsMap) { status, prog ->
+                        _predictionStatus.value = status
+                        _predictionProgress.value = prog.coerceIn(0f, 1f)
+                    }
+                }
+
+                _cashFlowPrediction.value = prediction
+                _predictionStatus.value = "Prediction complete!"
+                _predictionProgress.value = 1f
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Cash flow prediction failed", e)
+                _predictionStatus.value = "Error: Prediction failed. ${e.message}"
+                _predictionProgress.value = 0f
+            } finally {
+                delay(300)
+                _isPredicting.value = false
+            }
+        }
+    }
+
+    // ============================================================================================
+    // SECTION 6: VOICE & CLEANUP
+    // ============================================================================================
+
+    fun speakCashFlowSummary() {
+        val prediction = _cashFlowPrediction.value ?: return
+        voiceManager?.let { vm ->
+            _isSpeaking.value = true
+            val text = vm.generateVoiceSummary(prediction)
+            vm.speak(text) { _isSpeaking.value = false }
+        } ?: run {
+            _modelStatus.value = "Voice manager not initialized"
+        }
+    }
+
+    fun stopSpeaking() {
+        try {
+            voiceManager?.stop()
+        } catch (e: Exception) {
+            Log.w("ChatViewModel", "stopSpeaking error: ${e.message}")
+        } finally {
+            _isSpeaking.value = false
+        }
+    }
+
+    // --- Voice Coach / ASR state ---
+    private val _isVoiceListening = MutableStateFlow(false)
+    val isVoiceListening: StateFlow<Boolean> = _isVoiceListening
+
+    /**
+     * Start voice coach (ASR) -> will call sendMessage(...) on final transcripts.
+     * Caller must ensure RECORD_AUDIO permission is granted (we check it here).
+     */
+    fun startVoiceCoach(context: Context) {
+        viewModelScope.launch {
+            try {
+                initializeVoice(context)
+
+                // check permission (activity/compose layer should have requested it already)
+                val perm = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.RECORD_AUDIO
+                )
+                if (perm != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    _modelStatus.value = "Voice permission required. Please grant RECORD_AUDIO."
+                    return@launch
+                }
+
+                if (voiceManager == null) {
+                    _modelStatus.value = "Voice manager not initialized"
+                    return@launch
+                }
+
+                _modelStatus.value = "Starting voice coach..."
+                _isVoiceListening.value = true
+
+                // Call startListening — VoiceManager provides callbacks
+                try {
+                    voiceManager!!.startListening(
+                        onPartial = { interim ->
+                            _modelStatus.value = "Listening… $interim"
+                        },
+
+                        onFinal = { finalText ->
+                            val trimmed = finalText.trim()
+                            if (trimmed.isNotBlank()) {
+                                // send and request speaking of assistant's reply
+                                viewModelScope.launch {
+                                    // ensure _isVoiceListening remains true so sendMessage can restart listening after TTS
+                                    sendMessage(trimmed, speakResponse = true)
+                                }
+                            }
+                        },
+
+
+                        onError = { err ->
+                            _modelStatus.value = "Voice error: $err"
+                            // stop listening when error occurs
+                            stopVoiceCoach()
+                        },
+                        onStopped = {
+                            // ensure we update state on main thread
+                            viewModelScope.launch {
+                                _isVoiceListening.value = false
+                                _modelStatus.value = "Voice stopped"
+                            }
+                        }
+                    )
+                } catch (e: SecurityException) {
+                    _modelStatus.value = "Permission denied for audio: ${e.message}"
+                    _isVoiceListening.value = false
+                } catch (e: Exception) {
+                    _modelStatus.value = "Failed to start voice coach: ${e.message}"
+                    _isVoiceListening.value = false
+                }
+
+            } catch (se: SecurityException) {
+                _modelStatus.value = "Permission denied for audio: ${se.message}"
+                _isVoiceListening.value = false
+            } catch (e: Exception) {
+                _modelStatus.value = "Failed to start voice coach: ${e.message}"
+                _isVoiceListening.value = false
+            }
+        }
+    }
+
+    /**
+     * Stop the voice listening session cleanly.
+     */
+    fun stopVoiceCoach() {
+        try {
+            voiceManager?.stopListening()
+        } catch (e: Exception) {
+            Log.w("ChatViewModel", "stopVoiceCoach error: ${e.message}")
+        } finally {
+            _isVoiceListening.value = false
+            _modelStatus.value = "Voice stopped"
+        }
+    }
+
+    fun onClearedCleanup() {
+        try {
+            voiceManager?.shutdown()
+        } catch (e: Exception) { /* ignore */ }
+    }
+
     override fun onCleared() {
         super.onCleared()
-        voiceManager?.shutdown()
+        onClearedCleanup()
     }
 }

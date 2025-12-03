@@ -19,11 +19,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -31,19 +33,27 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.runanywhere.startup_hackathon20.ui.theme.Startup_hackathon20Theme
 
 class MainActivity : ComponentActivity() {
 
-    private val requestPermissionLauncher = registerForActivityResult(
+    // Notification permission launcher (Android 13+)
+    private val requestNotificationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        // Handle permission result if needed
+    ) { _granted: Boolean ->
+        // Optional: handle result, show rationale, etc.
+    }
+
+    // RECORD_AUDIO permission launcher — call when user intentionally opens voice features
+    private val requestAudioLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted: Boolean ->
+        // Optional: handle audio permission result (granted==true -> start voice, else show message)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Makes the app draw edge-to-edge
         enableEdgeToEdge()
 
         setContent {
@@ -52,19 +62,38 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Request notification permission for Android 13+
+        // Request notification permission for Android 13+ (optional, UX decision)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestNotificationPermission()
+            requestNotificationPermissionIfNeeded()
         }
     }
 
-    private fun requestNotificationPermission() {
+    private fun requestNotificationPermissionIfNeeded() {
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    /**
+     * Public helper you can call from UI (e.g. Dashboard or ChatScreen) to ask for RECORD_AUDIO
+     * before starting the Voice Coach. This keeps permission flow inside the Activity.
+     *
+     * Example usage from a composable:
+     *   (context as? MainActivity)?.requestAudioPermissionIfNeeded()
+     *
+     * Or better: expose an event to Activity from NavController or your Activity->ViewModel wiring.
+     */
+    fun requestAudioPermissionIfNeeded() {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 }
@@ -74,29 +103,23 @@ fun AppNavigation() {
     val navController = rememberNavController()
     val chatViewModel: ChatViewModel = viewModel()
 
-    // ROUTES: explicit constants to avoid typos
+    // route constants
     val ROUTE_DASH = "dashboard"
-    val ROUTE_CHAT = "chat"        // chatbot
-    val ROUTE_ANALYSIS = "analysis"// sms analysis
+    val ROUTE_CHAT = "chat"
+    val ROUTE_ANALYSIS = "analysis"
     val ROUTE_CASH = "cash_flow"
     val ROUTE_MODELS = "models"
 
-    // Initialize voice when app starts
     LaunchedEffect(Unit) {
-        // Voice will be initialized when needed in ChatViewModel
+        // Voice initialization happens inside ChatScreen / ViewModel when requested.
     }
 
-    // Scaffold with BottomBar (keeps UI consistent)
     Scaffold(
         bottomBar = {
-            // show bottom bar on all screens (you can add logic to hide on specific routes)
-            BottomBar(navController, routes = listOf(
-                ROUTE_DASH,
-                ROUTE_CHAT,
-                ROUTE_ANALYSIS,
-                ROUTE_CASH,
-                ROUTE_MODELS
-            ))
+            BottomBar(
+                navController,
+                routes = listOf(ROUTE_DASH, ROUTE_CHAT, ROUTE_ANALYSIS, ROUTE_CASH, ROUTE_MODELS)
+            )
         }
     ) { innerPadding ->
         NavHost(
@@ -104,23 +127,21 @@ fun AppNavigation() {
             startDestination = ROUTE_DASH,
             modifier = Modifier.padding(innerPadding)
         ) {
+
             composable(ROUTE_DASH) {
                 Dashboard(navController = navController, viewModel = chatViewModel)
             }
 
-            // CRITICAL: chat must map to ChatScreen
+            // Plain chat route (no param)
             composable(ROUTE_CHAT) {
                 LaunchedEffect(Unit) {
                     android.util.Log.d("NAV", "Composed ChatScreen for route: $ROUTE_CHAT")
                 }
-                ChatScreen(viewModel = chatViewModel)
+                ChatScreen(viewModel = chatViewModel) // default voice mode = false
             }
 
-            // SMS analysis is a DIFFERENT route
+            // SMS analysis
             composable(ROUTE_ANALYSIS) {
-                LaunchedEffect(Unit) {
-                    android.util.Log.d("NAV", "Composed SmsAnalysisScreen for route: $ROUTE_ANALYSIS")
-                }
                 SmsAnalysisScreen(viewModel = chatViewModel)
             }
 
@@ -132,80 +153,87 @@ fun AppNavigation() {
                 ModelManagementScreen(viewModel = chatViewModel)
             }
 
-            // backward-compatible alias (if other code still uses it)
+            // backward-compatible alias
             composable("chatbot") {
                 ChatScreen(viewModel = chatViewModel)
+            }
+
+            // Chat route WITH voice param
+            composable(
+                route = "chat?start_voice={start_voice}",
+                arguments = listOf(navArgument("start_voice") {
+                    defaultValue = "false"
+                })
+            ) { backStackEntry ->
+                val startVoice = backStackEntry.arguments?.getString("start_voice")?.toBoolean() ?: false
+
+                // If you want to request audio permission automatically here (not recommended),
+                // you could do that by casting LocalContext to MainActivity and calling the helper:
+                // (LocalContext.current as? MainActivity)?.requestAudioPermissionIfNeeded()
+                //
+                // I avoided automatic permission prompts to respect UX best-practices; instead
+                // ChatScreen/startVoiceCoach checks permissions and prompts user or sets status.
+
+                ChatScreen(viewModel = chatViewModel, startInVoiceMode = startVoice)
             }
         }
     }
 }
 
-/**
- * BottomBar implementation for all 5 main screens.
- */
 @Composable
 fun BottomBar(
     navController: NavHostController,
     routes: List<String>
 ) {
-    // Define navigation items with proper icons and labels
     val items = listOf(
-        NavigationItem(
-            route = routes[0],
-            label = "Dashboard",
-            icon = Icons.Default.Home
-        ),
-        NavigationItem(
-            route = routes[1],
-            label = "Chat",
-            icon = Icons.Default.Chat
-        ),
-        NavigationItem(
-            route = routes[2],
-            label = "SMS",
-            icon = Icons.Default.Analytics
-        ),
-        NavigationItem(
-            route = routes[3],
-            label = "Cash Flow",
-            icon = Icons.Default.MonetizationOn
-        ),
-        NavigationItem(
-            route = routes[4],
-            label = "Models",
-            icon = Icons.Default.Settings
-        )
+        NavigationItem(route = routes[0], label = "Dash\nboard", icon = Icons.Default.Home),
+        NavigationItem(route = routes[1], label = "AI Chat", icon = Icons.Default.Chat),
+        NavigationItem(route = routes[2], label = "SMS\nAnalysis", icon = Icons.Default.Analytics),
+        NavigationItem(route = routes[3], label = "Cash Flow\nSummary", icon = Icons.Default.MonetizationOn),
+        NavigationItem(route = routes[4], label = "Models", icon = Icons.Default.Settings)
     )
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    NavigationBar {
+    NavigationBar(modifier = Modifier.navigationBarsPadding()) {
         items.forEach { item ->
             NavigationBarItem(
-                icon = { Icon(item.icon, contentDescription = item.label) },
-                label = { Text(item.label) },
+                icon = {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label
+                    )
+                },
+                label = {
+                    Text(
+                        text = item.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
+                    )
+                },
                 selected = currentRoute == item.route,
                 onClick = {
                     if (currentRoute != item.route) {
                         navController.navigate(item.route) {
-                            // Keep navigation simple for demo: singleTop behavior
                             launchSingleTop = true
-                            // Clear back stack to avoid deep navigation issues
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = true
-                            }
-                            // Restore state when reselecting a previously selected item
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
                             restoreState = true
                         }
                     }
-                }
+                },
+                alwaysShowLabel = true,
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             )
         }
     }
 }
 
-// Data class for navigation items
 data class NavigationItem(
     val route: String,
     val label: String,

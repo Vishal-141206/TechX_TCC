@@ -1,5 +1,8 @@
 package com.runanywhere.startup_hackathon20
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,8 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -25,15 +30,17 @@ import androidx.navigation.NavController
 fun Dashboard(navController: NavController, viewModel: ChatViewModel) {
 
     // Collect state from ViewModel
-    val smsCount by viewModel.smsList.collectAsState()
-    val parsedCount by viewModel.parsedJsonBySms.collectAsState()
-    val scamCount by viewModel.scamResultBySms.collectAsState()
+    val smsList by viewModel.smsList.collectAsState()
+    val parsedMap by viewModel.parsedJsonBySms.collectAsState()
+    val scamMap by viewModel.scamResultBySms.collectAsState()
     val modelStatus by viewModel.modelStatus.collectAsState()
 
-    // Calculate statistics
-    val totalSms = smsCount.size
-    val totalParsed = parsedCount.size
-    val potentialScams = scamCount.values.count { it.contains("likely_scam", ignoreCase = true) }
+    val context = LocalContext.current
+
+    // Derived stats (remembered)
+    val totalSms = remember(smsList) { smsList.size }
+    val totalParsed = remember(parsedMap) { parsedMap.size }
+    val potentialScams = remember(scamMap) { scamMap.values.count { it.contains("likely_scam", ignoreCase = true) } }
 
     Scaffold(
         topBar = {
@@ -115,10 +122,21 @@ fun Dashboard(navController: NavController, viewModel: ChatViewModel) {
                     title = "Voice Finance Coach",
                     description = "Get voice summaries of your finances and insights.",
                     icon = Icons.Default.VoiceChat,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                     onClick = {
-                        // Initialize voice if needed and navigate
-                        navController.navigate("chat")
+                        // If RECORD_AUDIO is already granted -> navigate to chat in voice mode.
+                        // Otherwise ask MainActivity to request it (the Activity will show the system dialog).
+                        val hasPermission = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (hasPermission) {
+                            navController.navigate("chat?start_voice=true")
+                        } else {
+                            // Ask the Activity to request permission via the registered launcher.
+                            (context as? MainActivity)?.requestAudioPermissionIfNeeded()
+                        }
                     }
                 )
             }
@@ -290,9 +308,9 @@ fun DashboardCard(
                 )
             }
 
-            // Navigation arrow
+            // Navigation arrow (keeps consistent look)
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.Chat, // Using chat icon as arrow
+                imageVector = Icons.AutoMirrored.Filled.Chat,
                 contentDescription = "Navigate",
                 modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)

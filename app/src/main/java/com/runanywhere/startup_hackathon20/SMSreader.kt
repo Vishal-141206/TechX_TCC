@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.regex.Pattern
 
 data class RawSms(
     val id: String,
@@ -15,19 +16,19 @@ data class RawSms(
 )
 
 /**
- * Read SMS Inbox using robust heuristics tuned for Indian banking messages.
+ * Read SMS Inbox but strictly import only bank/payment transaction messages.
  *
- * - Numeric shortcodes (3-6 digits) -> treated as business
- * - Alphanumeric shortcodes (3-12 chars, must contain letter) -> business
- * - Phone-like numbers -> treated as business only if message contains financial keywords
- * - If address is blank but body strongly matches financial keywords -> include as fallback
+ * Rules:
+ * - Exclude OTP/verification/login/reset messages.
+ * - Include when BOTH: (body contains a transaction verb) AND (body contains an amount pattern)
+ * - OR include when sender is a bank/business short code / contains known bank token AND body contains a transaction verb.
  */
 fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null): List<RawSms> {
     val uriSms: Uri = Uri.parse("content://sms/inbox")
     var selection: String? = null
     var selectionArgs: Array<String>? = null
 
-    Log.d("SMSReader", "Starting SMS Scan... limit=$limit daysLookBack=$daysLookBack")
+    Log.d("SMSReader", "Starting strict SMS Scan... limit=$limit daysLookBack=$daysLookBack")
 
     if (daysLookBack != null) {
         val calendar = Calendar.getInstance()
@@ -52,118 +53,102 @@ fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null)
 
     val results = mutableListOf<RawSms>()
 
-    // Keywords that indicate a transaction (used both for content classification and fallback)
-    val financialKeywords = listOf(
-        "credit", "credited", "debit", "debited", "txn", "transaction", "acct", "account",
-        "spent", "received", "bank", "pay", "upi", "inr", "rs.", "avl", "avl bal", "available balance",
-        "withdraw", "purchase", "stmt", "neft", "imps", "rtgs", "credited to your account", "debited from"
+    // Transaction verbs (case-insensitive)
+    val transactionVerbs = listOf(
+        "debited", "credited", "credit", "debit", "txn", "transaction", "transferred",
+        "withdrawn", "withdrawal", "paid", "purchase", "spent", "sent to", "received",
+        "payment", "failed", "reversed", "refund", "credited to", "debited from", "utR",
+        "ref", "via neft", "via imps", "via rtgs", "upi"
     )
 
-    // Exclude OTPs to reduce noise (unless you want them for scam detection)
+    // Exclusion keywords (otp/verification/login/etc.)
     val exclusionKeywords = listOf(
-        "otp is", "otp:", "one time password", "verification code", "auth code", "use otp", "pin is", "pin:"
+        "otp", "one time password", "one-time password", "verification code",
+        "use otp", "expires", "valid for", "password reset", "login", "logged in"
     )
 
-    cursor?.use {
-        val idIdx = it.getColumnIndexOrThrow("_id")
-        val addressIdx = it.getColumnIndexOrThrow("address")
-        val bodyIdx = it.getColumnIndexOrThrow("body")
-        val dateIdx = it.getColumnIndexOrThrow("date")
+    // Bank/payment sender tokens (common)
+    val bankTokens = listOf(
+        "BANK", "HDFC", "SBI", "ICICI", "AXIS", "PNB", "IDBI", "BOB", "KOTAK","IOB","CENTBK","BOI",
+        "YESBNK", "CITI", "PAYTM", "PHONEPE", "GPAY", "AMAZON", "FLIPKART",
+        "AXISBK", "HDFCBK", "SBIINB", "KOTAKBNK"
+    )
+
+    // Regex to detect amount patterns (INR / Rs / ₹ or numeric amounts like 1,234.56)
+    val amountPattern = Pattern.compile("(?i)(?:inr|rs\\.?|₹)\\s*([0-9]{1,3}(?:[,\\s][0-9]{3})*(?:\\.[0-9]{1,2})?|[0-9]+(?:\\.[0-9]{1,2})?)")
+    val anyNumberPattern = Pattern.compile("\\b[0-9]{2,}(?:[,\\.][0-9]{2,})?\\b") // fallback numeric detection
+
+    cursor?.use { c ->
+        val idIdx = c.getColumnIndexOrThrow("_id")
+        val addressIdx = c.getColumnIndexOrThrow("address")
+        val bodyIdx = c.getColumnIndexOrThrow("body")
+        val dateIdx = c.getColumnIndexOrThrow("date")
 
         var totalScanned = 0
-        while (it.moveToNext() && results.size < limit) {
+        while (c.moveToNext() && results.size < limit) {
             totalScanned++
-            val rawAddress = it.getString(addressIdx)
-            val body = it.getString(bodyIdx) ?: ""
-            val cleanBody = body.lowercase(Locale.getDefault())
+            val id = c.getString(idIdx) ?: continue
+            val rawAddress = c.getString(addressIdx)
+            val body = c.getString(bodyIdx) ?: ""
+            val cleanBody = body.lowercase(Locale.getDefault()).trim()
 
-            // Heuristics
-            val senderIsBusiness = isBusinessSender(rawAddress, cleanBody)
-            val isFinancialByContent = financialKeywords.any { k -> cleanBody.contains(k) }
-            val isExcluded = exclusionKeywords.any { k -> cleanBody.contains(k) }
+            // Skip empty bodies
+            if (cleanBody.isEmpty()) continue
 
-            // If explicitly excluded (OTPs etc.) skip
-            if (isExcluded) continue
+            // Exclude OTP/verification/login messages aggressively
+            if (exclusionKeywords.any { cleanBody.contains(it) }) continue
 
-            // Primary acceptance: business sender OR strong content match
-            val accept = senderIsBusiness || isFinancialByContent
+            // Check transaction verb presence
+            val hasTransactionVerb = transactionVerbs.any { cleanBody.contains(it, ignoreCase = true) }
 
-            if (!accept) {
-                // not business-like and not financial content: skip
-                continue
+            // Check amount presence (INR/Rs/₹ pattern)
+            val amountMatcher = amountPattern.matcher(body)
+            val hasAmount = amountMatcher.find() || anyNumberPattern.matcher(body).find().and(hasTransactionVerb) // require verb for pure numeric fallback
+
+            // Sender heuristics
+            val senderIsBusiness = isBusinessSenderStrict(rawAddress, bankTokens)
+
+            // Decision logic:
+            // - Strict path: require a transaction verb AND an amount
+            // - Allow: sender is bank-like AND body has a transaction verb (amount may be absent in some bank alerts)
+            val accept = when {
+                hasTransactionVerb && hasAmount -> true
+                senderIsBusiness && hasTransactionVerb -> true
+                else -> false
             }
 
-            // Now safe to add
-            val id = it.getString(idIdx) ?: continue
-            val date = try { it.getLong(dateIdx) } catch (e: Exception) { 0L }
+            if (!accept) continue
+
+            val date = c.getLong(dateIdx)
             results.add(RawSms(id, rawAddress, body, date))
         }
-        Log.d("SMSReader", "Scan Complete. Scanned: $totalScanned. Imported: ${results.size}")
+
+        Log.d("SMSReader", "Strict Scan Complete. Scanned: $totalScanned. Imported: ${results.size}")
     }
 
     return results
 }
 
 /**
- * Enhanced heuristic to decide if a sender is business/bank-like.
- *
- * - numeric shortcodes (3-6 digits) -> business
- * - alnum shortcodes (3-12 chars, must contain at least one letter) -> business
- * - phone-like numbers: strip non-digits, then consider business if message contains financial keywords
- * - explicit bank tokens in the sender string -> business
+ * More conservative business-sender heuristic:
+ * - Numeric shortcodes (3-6 digits) -> business
+ * - Alphanumeric shortcodes (3-12 chars) -> business
+ * - Contains known bank tokens -> business
  */
-fun isBusinessSender(address: String?, messageBody: String? = null): Boolean {
+private fun isBusinessSenderStrict(address: String?, bankTokens: List<String>): Boolean {
     if (address.isNullOrBlank()) return false
-
     val s = address.trim()
     val sUpper = s.uppercase(Locale.getDefault())
-    val body = messageBody?.lowercase(Locale.getDefault()) ?: ""
 
-    // Patterns
-    val numericShort = Regex("^\\d{3,6}\$") // 3-6 digit shortcode
-    // require at least one letter to avoid matching purely-numeric shortcodes here
-    val alphaNumShort = Regex("^(?=.*[A-Z])[A-Z0-9\\-]{3,12}\$")
-    // we'll treat phone-like by stripping non-digits and checking length
-    val digitsOnly = s.replace(Regex("\\D"), "")
-    val phoneLikeLen = digitsOnly.length in 7..15
+    // numeric shortcode e.g., 575756
+    if (s.matches(Regex("^\\d{3,6}\$"))) return true
 
-    // 1) numeric shortcode -> business
-    if (numericShort.matches(s)) {
-        Log.d("SMSReader", "Sender business (numeric shortcode): $s")
-        return true
-    }
+    // alphanumeric shortcodes (HDFCBK, AXISBK, AMZ-PAY)
+    if (sUpper.matches(Regex("^[A-Z0-9\\-]{3,12}\$"))) return true
 
-    // 2) alphanumeric shortcode that contains letter -> business
-    if (alphaNumShort.matches(sUpper)) {
-        Log.d("SMSReader", "Sender business (alnum shortcode): $sUpper")
-        return true
-    }
+    // contains bank token
+    if (bankTokens.any { sUpper.contains(it) }) return true
 
-    // 3) explicit bank tokens in sender text
-    val bankTokens = listOf(
-        "BANK", "HDFC", "SBI", "ICICI", "AXIS", "PNB", "IDBI", "BOB", "KOTAK", "YESBANK",
-        "PAY", "RUPEE", "AMAZON", "GOOGLE", "PAYTM", "PHONEPE", "BHIM", "NMBL", "CITI"
-    )
-    if (bankTokens.any { sUpper.contains(it) }) {
-        Log.d("SMSReader", "Sender contains bank token, treated as business: $sUpper")
-        return true
-    }
-
-    // 4) phone-like: only business if body contains financial keywords
-    if (phoneLikeLen) {
-        if (body.isNotBlank()) {
-            val financialKeywords = listOf(
-                "credit", "credited", "debit", "debited", "txn", "transaction", "acct", "account",
-                "upi", "inr", "rs.", "avl", "available balance", "neft", "imps", "rtgs", "paid", "paid to"
-            )
-            val hasKeyword = financialKeywords.any { body.contains(it) }
-            Log.d("SMSReader", "Phone-like sender ${digitsOnly} -> body financial keyword present? $hasKeyword")
-            return hasKeyword
-        }
-        return false
-    }
-
-    // Default: not business
     return false
 }
 
