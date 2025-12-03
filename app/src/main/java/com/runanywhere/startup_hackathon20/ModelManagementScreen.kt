@@ -29,6 +29,7 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
     val availableModels by viewModel.availableModels.collectAsState()
     val currentModelId by viewModel.currentModelId.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadingModelId by viewModel.downloadingModelId.collectAsState()
     val modelStatus by viewModel.modelStatus.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
@@ -270,10 +271,15 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(availableModels) { model ->
+                        // Determine per-model downloading state & progress
+                        val isDownloadingForThisModel = downloadingModelId == model.id
+                        val progressForThisModel = if (isDownloadingForThisModel) downloadProgress else null
+
                         ModelItem(
                             model = model,
                             isLoaded = model.id == currentModelId,
-                            isDownloading = downloadProgress != null,
+                            isDownloading = isDownloadingForThisModel,
+                            downloadProgress = progressForThisModel,
                             onDownload = { viewModel.downloadModel(model.id) },
                             onLoad = { viewModel.loadModel(model.id) }
                         )
@@ -289,6 +295,7 @@ fun ModelItem(
     model: ModelInfo,
     isLoaded: Boolean,
     isDownloading: Boolean,
+    downloadProgress: Float?, // null when not downloading this model
     onDownload: () -> Unit,
     onLoad: () -> Unit
 ) {
@@ -358,13 +365,22 @@ fun ModelItem(
                     OutlinedButton(
                         onClick = onDownload,
                         enabled = !isDownloading,
-                        modifier = Modifier.width(120.dp)
+                        modifier = Modifier.width(140.dp)
                     ) {
                         if (isDownloading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
+                            // Show determinate indicator when progress is provided
+                            if (downloadProgress != null) {
+                                CircularProgressIndicator(
+                                    progress = downloadProgress.coerceIn(0f, 1f),
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Downloading")
                         } else {

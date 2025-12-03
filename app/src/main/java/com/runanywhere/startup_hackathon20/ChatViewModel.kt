@@ -53,11 +53,16 @@ class ChatViewModel : ViewModel() {
     private val _availableModels = MutableStateFlow<List<ModelInfo>>(emptyList())
     val availableModels: StateFlow<List<ModelInfo>> = _availableModels
 
+    // Keep a single global download progress (0f..1f) or null when none
     private val _downloadProgress = MutableStateFlow<Float?>(null)
     val downloadProgress: StateFlow<Float?> = _downloadProgress
 
     private val _currentModelId = MutableStateFlow<String?>(null)
     val currentModelId: StateFlow<String?> = _currentModelId
+
+    // Which model (id) is currently being downloaded (null = none)
+    private val _downloadingModelId = MutableStateFlow<String?>(null)
+    val downloadingModelId: StateFlow<String?> = _downloadingModelId
 
     // Per-screen status flows (avoid a single global status string)
     private val _modelStatus = MutableStateFlow("Initializing models...")
@@ -145,20 +150,39 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Download a model (single active download supported).
+     * Sets _downloadingModelId so UI can show which model is downloading.
+     */
     fun downloadModel(modelId: String) {
         viewModelScope.launch {
+            // Prevent starting a different download if one is already active
+            val currentlyDownloading = _downloadingModelId.value
+            if (currentlyDownloading != null && currentlyDownloading != modelId) {
+                _modelStatus.value = "Another model is downloading: $currentlyDownloading"
+                return@launch
+            }
+
             try {
-                _modelStatus.value = "Downloading model..."
+                _downloadingModelId.value = modelId
+                _downloadProgress.value = 0f
+                _modelStatus.value = "Downloading model $modelId..."
+
+                // RunAnywhere.downloadModel returns a Flow<Float> with progress updates (0..1)
                 RunAnywhere.downloadModel(modelId).collect { progress ->
                     _downloadProgress.value = progress
-                    _modelStatus.value = "Downloading: ${(progress * 100).toInt()}%"
+                    _modelStatus.value = "Downloading $modelId: ${(progress * 100).toInt()}%"
                 }
-                _downloadProgress.value = null
+
+                // Completed
                 _modelStatus.value = "Download complete! Please load the model."
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error downloading model", e)
                 _modelStatus.value = "Download failed: ${e.message}"
+            } finally {
+                // Clean up so UI doesn't think download remains active
                 _downloadProgress.value = null
+                _downloadingModelId.value = null
             }
         }
     }
@@ -400,7 +424,7 @@ class ChatViewModel : ViewModel() {
     private val extractionPromptTemplate = """
         You are a strict JSON extractor. Input: a single bank/payment SMS in English. Output: ONLY a single JSON object between BEGIN_JSON and END_JSON tags. The JSON must have keys:
         amount (number or null), currency ("INR"), merchant (string or null), type ("debit"|"credit"|"info"), date (YYYY-MM-DD or null), account_tail (string or null), balance (number or null), raw_text (original message).
-
+    
         Return valid JSON ONLY. NOTHING else. Examples follow.
         Example 1:
         SMS: "HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."
@@ -408,14 +432,14 @@ class ChatViewModel : ViewModel() {
         BEGIN_JSON
         {"amount":1250,"currency":"INR","merchant":"AMAZON PAY","type":"debit","date":"2025-11-26","account_tail":null,"balance":5000,"raw_text":"HDFC Bank: Debited INR 1,250.00 at AMAZON PAY on 2025-11-26. Avl Bal: INR 5,000."}
         END_JSON
-
+    
         Example 2:
         SMS: "SBI: Credited Rs. 10,000.00 via NEFT. Ref 12345."
         JSON:
         BEGIN_JSON
         {"amount":10000,"currency":"INR","merchant":null,"type":"credit","date":null,"account_tail":null,"balance":null,"raw_text":"SBI: Credited Rs. 10,000.00 via NEFT. Ref 12345."}
         END_JSON
-
+    
         Now parse this SMS (return ONLY one JSON between BEGIN_JSON and END_JSON):
     """.trimIndent()
 
@@ -439,10 +463,11 @@ class ChatViewModel : ViewModel() {
                 var streamed = ""
                 // 30s timeout is safer for batch processing
                 val result = withTimeoutOrNull(30000L) {
+                    var acc = ""
                     RunAnywhere.generateStream(prompt).collect { token ->
-                        streamed += token
+                        acc += token
                     }
-                    streamed
+                    acc
                 } ?: ""
 
                 val finalText = prompt + streamed

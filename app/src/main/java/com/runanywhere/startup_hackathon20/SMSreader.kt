@@ -7,7 +7,6 @@ import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.*
 
-// Simple data holder (unchanged)
 data class RawSms(
     val id: String,
     val address: String?,
@@ -16,11 +15,12 @@ data class RawSms(
 )
 
 /**
- * Reads SMS from Inbox with more tolerant filtering suited for Indian senders.
+ * Read SMS Inbox using robust heuristics tuned for Indian banking messages.
  *
- * - Recognizes numeric shortcodes (e.g., 575756), alphanumeric sender IDs (e.g., HDFCBK),
- *   and normal phone numbers when message body contains banking keywords.
- * - Excludes OTP/verification messages unless you want them for scam analysis.
+ * - Numeric shortcodes (3-6 digits) -> treated as business
+ * - Alphanumeric shortcodes (3-12 chars, must contain letter) -> business
+ * - Phone-like numbers -> treated as business only if message contains financial keywords
+ * - If address is blank but body strongly matches financial keywords -> include as fallback
  */
 fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null): List<RawSms> {
     val uriSms: Uri = Uri.parse("content://sms/inbox")
@@ -61,7 +61,7 @@ fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null)
 
     // Exclude OTPs to reduce noise (unless you want them for scam detection)
     val exclusionKeywords = listOf(
-        "otp is", "otp:", "one time password", "verification code", "auth code", "use otp"
+        "otp is", "otp:", "one time password", "verification code", "auth code", "use otp", "pin is", "pin:"
     )
 
     cursor?.use {
@@ -73,26 +73,30 @@ fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null)
         var totalScanned = 0
         while (it.moveToNext() && results.size < limit) {
             totalScanned++
-            val address = it.getString(addressIdx)
+            val rawAddress = it.getString(addressIdx)
             val body = it.getString(bodyIdx) ?: ""
             val cleanBody = body.lowercase(Locale.getDefault())
 
-            // 1. PRIMARY FILTER: Must be a Business Sender (Bank/Service) OR content strongly indicates financial txn
-            val senderIsBusiness = isBusinessSender(address, cleanBody)
+            // Heuristics
+            val senderIsBusiness = isBusinessSender(rawAddress, cleanBody)
             val isFinancialByContent = financialKeywords.any { k -> cleanBody.contains(k) }
             val isExcluded = exclusionKeywords.any { k -> cleanBody.contains(k) }
-
-            // If neither business-like sender nor clear financial content, skip
-            if (!senderIsBusiness && !isFinancialByContent) {
-                continue
-            }
 
             // If explicitly excluded (OTPs etc.) skip
             if (isExcluded) continue
 
+            // Primary acceptance: business sender OR strong content match
+            val accept = senderIsBusiness || isFinancialByContent
+
+            if (!accept) {
+                // not business-like and not financial content: skip
+                continue
+            }
+
+            // Now safe to add
             val id = it.getString(idIdx) ?: continue
-            val date = it.getLong(dateIdx)
-            results.add(RawSms(id, address, body, date))
+            val date = try { it.getLong(dateIdx) } catch (e: Exception) { 0L }
+            results.add(RawSms(id, rawAddress, body, date))
         }
         Log.d("SMSReader", "Scan Complete. Scanned: $totalScanned. Imported: ${results.size}")
     }
@@ -101,13 +105,12 @@ fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null)
 }
 
 /**
- * Robust heuristic to decide if a sender is business/bank-like.
+ * Enhanced heuristic to decide if a sender is business/bank-like.
  *
- * Uses both `address` and `messageBody` to decide:
- * - Numeric shortcodes (3-6 digits) -> business
- * - Alphanumeric shortcodes (4-8 chars) -> business
- * - Long phone numbers -> business only if message contains banking keywords
- * - If sender contains common bank words (BANK, HDFC, SBI, ICICI, etc.) -> business
+ * - numeric shortcodes (3-6 digits) -> business
+ * - alnum shortcodes (3-12 chars, must contain at least one letter) -> business
+ * - phone-like numbers: strip non-digits, then consider business if message contains financial keywords
+ * - explicit bank tokens in the sender string -> business
  */
 fun isBusinessSender(address: String?, messageBody: String? = null): Boolean {
     if (address.isNullOrBlank()) return false
@@ -117,39 +120,44 @@ fun isBusinessSender(address: String?, messageBody: String? = null): Boolean {
     val body = messageBody?.lowercase(Locale.getDefault()) ?: ""
 
     // Patterns
-    val numericShort = Regex("^\\d{3,6}\$") // e.g., 575756
-    val alphaNumShort = Regex("^[A-Z0-9\\-]{3,12}\$") // allow hyphenated shortcodes
-    val phoneLike = Regex("^\\+?\\d{7,15}\$") // e.g., +919876543210 or 9876543210
+    val numericShort = Regex("^\\d{3,6}\$") // 3-6 digit shortcode
+    // require at least one letter to avoid matching purely-numeric shortcodes here
+    val alphaNumShort = Regex("^(?=.*[A-Z])[A-Z0-9\\-]{3,12}\$")
+    // we'll treat phone-like by stripping non-digits and checking length
+    val digitsOnly = s.replace(Regex("\\D"), "")
+    val phoneLikeLen = digitsOnly.length in 7..15
 
-    // 1) If sender looks like a short numeric shortcode -> business
+    // 1) numeric shortcode -> business
     if (numericShort.matches(s)) {
-        Log.d("SMSReader", "Sender treated as business (numeric shortcode): $s")
+        Log.d("SMSReader", "Sender business (numeric shortcode): $s")
         return true
     }
 
-    // 2) If sender is an alphanumeric short ID (HDFCBK, AXISBK, JM-AMZPAY) -> business
+    // 2) alphanumeric shortcode that contains letter -> business
     if (alphaNumShort.matches(sUpper)) {
-        // If there is absolutely no body and it's a short alnum, still consider business
-        Log.d("SMSReader", "Sender treated as business (alnum shortcode): $sUpper")
+        Log.d("SMSReader", "Sender business (alnum shortcode): $sUpper")
         return true
     }
 
-    // 3) If sender contains clear bank names or tokens -> business
-    val bankTokens = listOf("BANK", "HDFC", "SBI", "ICICI", "AXIS", "PNB", "IDBI", "BOB", "PAY", "RUPEE", "AMAZON", "GOOGLE", "PAYTM", "PHONEPE")
+    // 3) explicit bank tokens in sender text
+    val bankTokens = listOf(
+        "BANK", "HDFC", "SBI", "ICICI", "AXIS", "PNB", "IDBI", "BOB", "KOTAK", "YESBANK",
+        "PAY", "RUPEE", "AMAZON", "GOOGLE", "PAYTM", "PHONEPE", "BHIM", "NMBL", "CITI"
+    )
     if (bankTokens.any { sUpper.contains(it) }) {
         Log.d("SMSReader", "Sender contains bank token, treated as business: $sUpper")
         return true
     }
 
-    // 4) If it's phone-like (personal-looking) then only treat as business when body contains financial keywords
-    if (phoneLike.matches(s)) {
+    // 4) phone-like: only business if body contains financial keywords
+    if (phoneLikeLen) {
         if (body.isNotBlank()) {
             val financialKeywords = listOf(
                 "credit", "credited", "debit", "debited", "txn", "transaction", "acct", "account",
-                "upi", "inr", "rs.", "avl", "available balance", "neft", "imps", "rtgs"
+                "upi", "inr", "rs.", "avl", "available balance", "neft", "imps", "rtgs", "paid", "paid to"
             )
             val hasKeyword = financialKeywords.any { body.contains(it) }
-            Log.d("SMSReader", "Phone-like sender $s -> body financial keyword present? $hasKeyword")
+            Log.d("SMSReader", "Phone-like sender ${digitsOnly} -> body financial keyword present? $hasKeyword")
             return hasKeyword
         }
         return false

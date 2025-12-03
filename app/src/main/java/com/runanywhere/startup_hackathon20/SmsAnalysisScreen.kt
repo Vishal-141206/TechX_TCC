@@ -1,6 +1,8 @@
 package com.runanywhere.startup_hackathon20
 
-import android.util.Log
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,32 +13,31 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontFamily
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmsAnalysisScreen(viewModel: ChatViewModel = viewModel()) {
     val context = LocalContext.current
-
-    // Use the ViewModel's StateFlows (these exist in your ChatViewModel)
     val smsList by viewModel.smsList.collectAsState()
     val isImportingSms by viewModel.isImportingSms.collectAsState()
     val parsedMap by viewModel.parsedJsonBySms.collectAsState()
     val scamMap by viewModel.scamResultBySms.collectAsState()
-    val processingProgress by viewModel.processingProgress.collectAsState()
-    val statusMessage by viewModel.statusMessage.collectAsState()
 
-    LaunchedEffect(Unit) {
-        Log.d("UI_ROUTE", "SmsAnalysisScreen mounted")
-    }
-
-    Scaffold(topBar = { TopAppBar(title = { Text("SMS Analysis") }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("SMS Analysis") }
+            )
+        }
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Import controls
+            // Import Controls
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -44,96 +45,54 @@ fun SmsAnalysisScreen(viewModel: ChatViewModel = viewModel()) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Request permission button
-                Button(
-                    onClick = {
-                        // You might want to call a permission request function here
-                        // For now, just trigger SMS import
-                        viewModel.importSms(context)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Text("Request Permission & Import SMS")
+                // Permission Request Button
+                RequestSmsAndAudioPermissionButton {
+                    viewModel.importSms(context)
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
+                // Direct Import Button (if permissions already granted)
                 Button(
                     onClick = { viewModel.importSms(context) },
                     enabled = !isImportingSms
                 ) {
-                    Text(if (isImportingSms) "Importing..." else "Import SMS")
+                    Text(if (isImportingSms) "Importing..." else "Refresh SMS")
                 }
             }
 
-            Divider()
+            HorizontalDivider()
 
-            // Status
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(text = statusMessage, style = MaterialTheme.typography.bodySmall)
-            }
-
-            Divider()
-
-            // Processing controls
+            // Processing Controls
             if (smsList.isNotEmpty()) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
+                    Button(
+                        onClick = { viewModel.processAllMessages() },
+                        enabled = true
                     ) {
-                        Button(
-                            onClick = { viewModel.processAllMessages() },
-                            enabled = processingProgress == 0
-                        ) {
-                            if (processingProgress > 0) Text("Processing...") else Text("Process All")
-                        }
-                    }
-
-                    if (processingProgress > 0) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = (processingProgress.coerceIn(0, 100) / 100f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${processingProgress.coerceIn(0, 100)}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        )
+                        Text("Process All & Check Scams")
                     }
                 }
-
-                Divider()
             } else {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
+                        .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No SMS messages imported yet. Tap 'Import SMS' to load messages from your device.",
-                        style = MaterialTheme.typography.bodyMedium
+                        text = "No SMS imported yet.\nTap 'Grant Permissions' to start.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
                 }
-                Divider()
             }
 
-            // Messages list
+            // SMS List
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -142,19 +101,13 @@ fun SmsAnalysisScreen(viewModel: ChatViewModel = viewModel()) {
                 contentPadding = PaddingValues(vertical = 16.dp)
             ) {
                 items(smsList) { sms ->
-                    SmsCard(
-                        sms = sms,
-                        viewModel = viewModel,
-                        parsedJson = parsedMap[sms.id],
-                        scamStatus = scamMap[sms.id]
-                    )
+                    SmsCard(sms, viewModel, parsedMap[sms.id], scamMap[sms.id])
                 }
             }
         }
     }
 }
 
-/** SmsCard matching your RawSms data model and ViewModel actions */
 @Composable
 fun SmsCard(
     sms: RawSms,
@@ -208,16 +161,17 @@ fun SmsCard(
                         text = "Parsed: $parsedJson",
                         modifier = Modifier.padding(8.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
             }
 
             if (!scamStatus.isNullOrBlank()) {
+                val isScam = scamStatus.contains("likely", true)
                 Text(
                     text = "Scam Check: $scamStatus",
-                    color = if (scamStatus.contains("likely", true)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+                    color = if (isScam) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
                     style = MaterialTheme.typography.labelMedium
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -251,6 +205,32 @@ fun SmsCard(
                 android.widget.Toast.makeText(context, "Saved", android.widget.Toast.LENGTH_SHORT).show()
             }
         )
+    }
+}
+
+@Composable
+fun RequestSmsAndAudioPermissionButton(onPermissionGranted: () -> Unit) {
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val smsGranted = permissions[Manifest.permission.READ_SMS] == true
+        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true
+        
+        if (smsGranted) {
+            onPermissionGranted()
+        }
+    }
+
+    Button(onClick = { 
+        launcher.launch(
+            arrayOf(
+                Manifest.permission.READ_SMS,
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.RECORD_AUDIO
+            )
+        ) 
+    }) {
+        Text("Grant Permissions")
     }
 }
 

@@ -10,7 +10,6 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VoiceChat
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -88,11 +87,11 @@ fun Dashboard(navController: NavController, viewModel: ChatViewModel) {
                 )
             }
 
-            // SMS Analysis (import & parse)
+            // SMS Analysis & Scam Detection (Combined)
             item {
                 DashboardCard(
-                    title = "SMS Transaction Analysis",
-                    description = "Import and analyze SMS transactions, detect scams and edit parsed output.",
+                    title = "SMS Analysis & Scam Check",
+                    description = "Import SMS to analyze transactions and detect potential scams/fraud.",
                     icon = Icons.Default.Analytics,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     onClick = { navController.navigate("analysis") }
@@ -121,17 +120,6 @@ fun Dashboard(navController: NavController, viewModel: ChatViewModel) {
                         // Initialize voice if needed and navigate
                         navController.navigate("chat")
                     }
-                )
-            }
-
-            // Scam Detector
-            item {
-                DashboardCard(
-                    title = "Scam Detection",
-                    description = "Check SMS messages for potential scams and fraud.",
-                    icon = Icons.Default.Security,
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
-                    onClick = { navController.navigate("analysis") }
                 )
             }
 

@@ -17,8 +17,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.text.font.FontWeight
-import java.text.SimpleDateFormat
-import java.util.*
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +36,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
+            // scroll after layout so keyboard changes have applied
             listState.animateScrollToItem(messages.size - 1)
         }
     }
@@ -52,11 +56,16 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 }
             )
         }
-    ) { padding ->
+    ) { innerPadding ->
+
+        // Apply scaffold's innerPadding, then ime and navigation insets so input is never obscured.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(innerPadding)       // scaffold top/bottom insets
+                .imePadding()                // move content up for keyboard
+                .navigationBarsPadding()     // respect navigation bar (bottom) area
+                .padding(bottom = 8.dp)      // small extra spacing above nav/keyboard
         ) {
             // Messages List
             LazyColumn(
@@ -102,9 +111,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     }
                 }
 
-                items(messages) { message ->
-                    MessageBubble(message)
-                }
+                items(messages) { message -> MessageBubble(message) }
 
                 if (isLoading) {
                     item {
@@ -143,7 +150,8 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             // Input Area
             Surface(
                 tonalElevation = 4.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
@@ -158,7 +166,12 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                         placeholder = { Text("Ask about your finances...") },
                         maxLines = 3,
                         enabled = !isLoading,
-                        shape = RoundedCornerShape(24.dp)
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        )
                     )
 
                     Spacer(modifier = Modifier.width(12.dp))
@@ -192,7 +205,6 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
 @Composable
 fun MessageBubble(message: ChatMessage) {
     val isUser = message.isUser
-    // FIX 1: Changed Alignment.End to Alignment.CenterEnd, Alignment.Start to Alignment.CenterStart
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
     val bubbleColor = if (isUser)
         MaterialTheme.colorScheme.primaryContainer
@@ -231,7 +243,6 @@ fun MessageBubble(message: ChatMessage) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (!isUser) {
-                        // FIX 2: Changed Icons.Default.Chat to Icons.Default.AccountBalance
                         Icon(
                             imageVector = Icons.Default.AccountBalance,
                             contentDescription = "Assistant",
