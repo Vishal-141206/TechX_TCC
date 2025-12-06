@@ -20,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -48,10 +50,10 @@ fun WelcomeScreen(onComplete: () -> Unit) {
             Color(0xFFEF5350)
         ),
         WelcomeTip(
-            Icons.Default.PrivacyTip,
+            Icons.Default.VerifiedUser,
             "Complete Privacy",
             "No tracking • No data collection • No ads",
-            Color(0xFFFF9800)
+            Color(0xFF4CAF50)
         )
     )
 
@@ -115,7 +117,7 @@ fun WelcomeScreen(onComplete: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(32.dp)
         ) {
-            // Animated App Icon
+            // Animated App Icon with multiple effects
             val scale by animateFloatAsState(
                 targetValue = if (isLoading) 0.8f else 1f,
                 animationSpec = spring(
@@ -125,19 +127,90 @@ fun WelcomeScreen(onComplete: () -> Unit) {
                 label = "scale"
             )
 
+            // Infinite rotation animation
+            val infiniteTransition = rememberInfiniteTransition(label = "infinite")
+            val rotation by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(3000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "rotation"
+            )
+
+            // Pulsing scale animation
+            val pulseScale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "pulse"
+            )
+
+            // Shimmer effect
+            val shimmer by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "shimmer"
+            )
+
             Box(
                 modifier = Modifier
                     .size(120.dp)
-                    .scale(scale)
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape),
+                    .scale(scale),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.AccountBalance,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = Color.White
+                // Elegant outer glow
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .scale(pulseScale)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFF667EEA).copy(alpha = 0.4f),
+                                    Color.Transparent
+                                )
+                            ),
+                            shape = CircleShape
+                        )
                 )
+
+                // Premium gradient background
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF667EEA),
+                                    Color(0xFF764BA2)
+                                )
+                            ),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Budget-friendly savings icon - no rotation, just pulse
+                    Icon(
+                        imageVector = Icons.Default.Savings,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .graphicsLayer(
+                                scaleX = pulseScale,
+                                scaleY = pulseScale
+                            ),
+                        tint = Color.White
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))

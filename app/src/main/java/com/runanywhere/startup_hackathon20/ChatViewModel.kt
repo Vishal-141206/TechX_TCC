@@ -450,8 +450,22 @@ class ChatViewModel : ViewModel() {
                     try {
                         val testResponse = withContext(Dispatchers.IO) {
                             var response = ""
-                            val testTimeout = withTimeoutOrNull(5000L) {
-                                RunAnywhere.generateStream("Say hi").collect { token ->
+                            val testTimeout = withTimeoutOrNull(10000L) { // Increased timeout for small models
+                                // Build test prompt with correct format for the loaded model
+                                val isSmallModel =
+                                    modelId.contains("smol") || modelId.contains("qwen")
+                                val testPrompt = if (isSmallModel) {
+                                    buildChatPrompt(
+                                        systemMsg = "Reply briefly.",
+                                        userMsg = "Hi"
+                                    )
+                                } else {
+                                    buildChatPrompt(
+                                        systemMsg = "You are a helpful assistant.",
+                                        userMsg = "Say hi"
+                                    )
+                                }
+                                RunAnywhere.generateStream(testPrompt).collect { token ->
                                     response += token
                                     Log.d("ChatViewModel", "Test token: '$token'")
                                 }
@@ -525,6 +539,91 @@ class ChatViewModel : ViewModel() {
     // ============================================================================================
 
     /**
+     * Clean response from small models - remove common artifacts and formatting issues
+     */
+    private fun cleanSmallModelResponse(response: String): String {
+        var cleaned = response.trim()
+
+        // Remove common prompt artifacts that small models echo back
+        val artifactsToRemove = listOf(
+            "### Response:",
+            "### Instruction:",
+            "### Input:",
+            "<|im_end|>",
+            "<|im_start|>",
+            "assistant:",
+            "user:",
+            "system:"
+        )
+
+        artifactsToRemove.forEach { artifact ->
+            cleaned = cleaned.replace(artifact, "", ignoreCase = true)
+        }
+
+        // Remove repeated newlines
+        cleaned = cleaned.replace(Regex("\n{3,}"), "\n\n")
+
+        // Remove leading/trailing quotes if present
+        if (cleaned.startsWith("\"") && cleaned.endsWith("\"")) {
+            cleaned = cleaned.substring(1, cleaned.length - 1)
+        }
+
+        // Truncate at first occurrence of another instruction marker
+        val truncateMarkers = listOf("###", "<|", "User:", "Assistant:")
+        truncateMarkers.forEach { marker ->
+            val index = cleaned.indexOf(marker, ignoreCase = true)
+            if (index > 50) { // Only truncate if we have some content before it
+                cleaned = cleaned.substring(0, index)
+            }
+        }
+
+        // Final trim
+        return cleaned.trim()
+    }
+
+    /**
+     * Build chat prompt with correct format based on loaded model.
+     * Optimized for SmolLM2, Qwen 2.5, and Llama 3.2
+     */
+    private fun buildChatPrompt(systemMsg: String, userMsg: String): String {
+        val modelId = _currentModelId.value?.lowercase() ?: ""
+
+        return when {
+            // Llama 3.2 uses Llama 3 format - works well as-is
+            modelId.contains("llama") -> buildString {
+                append("<|begin_of_text|>")
+                append("<|start_header_id|>system<|end_header_id|>\n\n")
+                append(systemMsg)
+                append("<|eot_id|>")
+                append("<|start_header_id|>user<|end_header_id|>\n\n")
+                append(userMsg)
+                append("<|eot_id|>")
+                append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+            }
+            // Qwen 2.5 - needs specific format without extra tokens
+            modelId.contains("qwen") -> buildString {
+                append("<|im_start|>system\n")
+                append(systemMsg)
+                append("<|im_end|>\n")
+                append("<|im_start|>user\n")
+                append(userMsg)
+                append("<|im_end|>\n")
+                append("<|im_start|>assistant\n")
+            }
+            // SmolLM2 - uses ChatML format like Qwen
+            else -> buildString {
+                append("<|im_start|>system\n")
+                append(systemMsg)
+                append("<|im_end|>\n")
+                append("<|im_start|>user\n")
+                append(userMsg)
+                append("<|im_end|>\n")
+                append("<|im_start|>assistant\n")
+            }
+        }
+    }
+
+    /**
      * Send a text prompt to the model and stream back the assistant reply.
      * If speakResponse==true, the final assistant reply is spoken by VoiceManager.
      */
@@ -556,13 +655,22 @@ class ChatViewModel : ViewModel() {
                 var fullResponse = ""
                 var tokenCount = 0
 
-                // Use simple direct prompt - complex prompts may cause empty responses
-                val simplePrompt = buildString {
-                    appendLine("You are a helpful financial advisor. Keep answers brief and practical.")
-                    appendLine()
-                    appendLine("Question: $text")
-                    appendLine()
-                    appendLine("Answer:")
+                // Build prompt with correct format for the loaded model
+                val modelId = _currentModelId.value?.lowercase() ?: ""
+                val isSmallModel = modelId.contains("smol") || modelId.contains("qwen")
+
+                val simplePrompt = if (isSmallModel) {
+                    // Ultra-simple prompt for small models - direct instruction
+                    buildChatPrompt(
+                        systemMsg = "Answer financial questions briefly.",
+                        userMsg = text.take(100) // Even shorter for small models
+                    )
+                } else {
+                    // More detailed prompt for larger models
+                    buildChatPrompt(
+                        systemMsg = "You are a helpful financial assistant. Give brief, practical advice in 2-3 sentences.",
+                        userMsg = text.take(200)
+                    )
                 }
 
                 Log.d("ChatViewModel", "Current model: ${_currentModelId.value}")
@@ -571,11 +679,26 @@ class ChatViewModel : ViewModel() {
                     "Sending prompt (${simplePrompt.length} chars): ${simplePrompt.take(150)}..."
                 )
 
-                // stream tokens (60s timeout for voice - allows complete response)
-                val result = withTimeoutOrNull(60_000L) {
+                // Use shorter timeout for small models (30s), longer for large models (60s)
+                val timeoutMs = if (isSmallModel) 30_000L else 60_000L
+
+                val result = withTimeoutOrNull(timeoutMs) {
                     try {
                         var hasReceivedTokens = false
+                        var stopGeneration = false
+
                         RunAnywhere.generateStream(simplePrompt).collect { token ->
+                            // Stop if we hit common end markers for small models
+                            if (isSmallModel && fullResponse.length > 300) { // Max ~2-3 sentences
+                                val endMarkers =
+                                    listOf("###", "<|im_end|>", "\n\nUser:", "\n\nInstruction:")
+                                if (endMarkers.any { fullResponse.contains(it) }) {
+                                    stopGeneration = true
+                                }
+                            }
+
+                            if (stopGeneration) return@collect
+
                             hasReceivedTokens = true
                             tokenCount++
                             fullResponse += token
@@ -657,6 +780,19 @@ class ChatViewModel : ViewModel() {
                     "ChatViewModel",
                     "Generation complete. Total tokens: $tokenCount, Response length: ${fullResponse.length}"
                 )
+
+                // Clean up response for small models (remove common artifacts)
+                if (isSmallModel) {
+                    fullResponse = cleanSmallModelResponse(fullResponse)
+                    // Update the message with cleaned response
+                    _messages.update { current ->
+                        val m = current.toMutableList()
+                        if (m.lastOrNull()?.isUser == false) {
+                            m[m.lastIndex] = m.last().copy(text = fullResponse)
+                        }
+                        m.toList()
+                    }
+                }
 
                 // If no response was generated
                 if (fullResponse.isBlank()) {
@@ -909,13 +1045,20 @@ class ChatViewModel : ViewModel() {
             }
 
             // Fallback to AI only if heuristic failed (slow path)
-            val prompt = buildString {
-                appendLine("Extract transaction data. Output ONLY JSON:")
-                appendLine("{\"amount\":<number>,\"merchant\":\"<name>\",\"type\":\"debit|credit\",\"date\":\"YYYY-MM-DD\"}")
-                appendLine()
-                appendLine("SMS: \"$smsBody\"")
-                appendLine()
-                appendLine("JSON:")
+            val modelId = _currentModelId.value?.lowercase() ?: ""
+            val isSmallModel = modelId.contains("smol") || modelId.contains("qwen")
+
+            val prompt = if (isSmallModel) {
+                // Ultra-simple for small models
+                buildChatPrompt(
+                    systemMsg = "Extract: amount, merchant, type, date",
+                    userMsg = smsBody.take(100) // Very short for small models
+                ) + "{\"amount\":"
+            } else {
+                buildChatPrompt(
+                    systemMsg = "Extract transaction from SMS as JSON.",
+                    userMsg = "SMS: ${smsBody.take(150)}\nOutput JSON with: amount, merchant, type (debit/credit), date"
+                ) + "{"
             }
 
             val result = withTimeoutOrNull(15_000L) { // Reduced from 30s to 15s
@@ -977,12 +1120,20 @@ class ChatViewModel : ViewModel() {
         }
 
         try {
-            val prompt = buildString {
-                appendLine("Is this SMS a scam? Answer: safe, likely_scam, or uncertain")
-                appendLine()
-                appendLine("SMS: \"$smsBody\"")
-                appendLine()
-                appendLine("Answer (one word):")
+            val modelId = _currentModelId.value?.lowercase() ?: ""
+            val isSmallModel = modelId.contains("smol") || modelId.contains("qwen")
+
+            val prompt = if (isSmallModel) {
+                // Ultra-simple for small models
+                buildChatPrompt(
+                    systemMsg = "Is this a scam?",
+                    userMsg = smsBody.take(100)
+                ) + "Answer: "
+            } else {
+                buildChatPrompt(
+                    systemMsg = "Classify SMS as: safe, likely_scam, or uncertain",
+                    userMsg = "SMS: ${smsBody.take(150)}"
+                )
             }
 
             val result = withTimeoutOrNull(8_000L) { // Reduced from 10s to 8s

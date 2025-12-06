@@ -46,10 +46,24 @@ class MainActivity : ComponentActivity() {
     }
 
     // RECORD_AUDIO permission launcher — call when user intentionally opens voice features
+    private var onAudioPermissionGranted: (() -> Unit)? = null
+
     private val requestAudioLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted: Boolean ->
-        // Optional: handle audio permission result (granted==true -> start voice, else show message)
+        if (granted) {
+            // Permission granted - execute the pending action
+            onAudioPermissionGranted?.invoke()
+            onAudioPermissionGranted = null
+        } else {
+            // Permission denied - show a message
+            android.widget.Toast.makeText(
+                this,
+                "Microphone permission is required for Voice Coach",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            onAudioPermissionGranted = null
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,18 +96,19 @@ class MainActivity : ComponentActivity() {
      * Public helper you can call from UI (e.g. Dashboard or ChatScreen) to ask for RECORD_AUDIO
      * before starting the Voice Coach. This keeps permission flow inside the Activity.
      *
-     * Example usage from a composable:
-     *   (context as? MainActivity)?.requestAudioPermissionIfNeeded()
-     *
-     * Or better: expose an event to Activity from NavController or your Activity->ViewModel wiring.
+     * @param onGranted - callback to execute when permission is granted
      */
-    fun requestAudioPermissionIfNeeded() {
+    fun requestAudioPermissionIfNeeded(onGranted: () -> Unit) {
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.RECORD_AUDIO
             ) != PackageManager.PERMISSION_GRANTED
         ) {
+            onAudioPermissionGranted = onGranted
             requestAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            // Permission already granted
+            onGranted()
         }
     }
 }
@@ -156,7 +171,20 @@ fun AppNavigation() {
                 LaunchedEffect(Unit) {
                     android.util.Log.d("NAV", "Composed ChatScreen for route: $ROUTE_CHAT")
                 }
-                ChatScreen(viewModel = chatViewModel) // default voice mode = false
+                ChatScreen(
+                    viewModel = chatViewModel,
+                    onNavigateToVoice = {
+                        android.util.Log.d("NAV", "onNavigateToVoice called!")
+
+                        try {
+                            // Use simpler navigation without popUpTo
+                            navController.navigate("chat?start_voice=true")
+                            android.util.Log.d("NAV", "Navigation command sent")
+                        } catch (e: Exception) {
+                            android.util.Log.e("NAV", "Navigation failed: ${e.message}")
+                        }
+                    }
+                ) // default voice mode = false
             }
 
             // SMS analysis
@@ -174,7 +202,14 @@ fun AppNavigation() {
 
             // backward-compatible alias
             composable("chatbot") {
-                ChatScreen(viewModel = chatViewModel)
+                ChatScreen(
+                    viewModel = chatViewModel,
+                    onNavigateToVoice = {
+                        navController.navigate("chat?start_voice=true") {
+                            popUpTo("chatbot") { inclusive = true }
+                        }
+                    }
+                )
             }
 
             // Chat route WITH voice param
@@ -186,6 +221,13 @@ fun AppNavigation() {
             ) { backStackEntry ->
                 val startVoice = backStackEntry.arguments?.getString("start_voice")?.toBoolean() ?: false
 
+                LaunchedEffect(Unit) {
+                    android.util.Log.d(
+                        "NAV",
+                        "Voice route composable triggered! startVoice=$startVoice"
+                    )
+                }
+
                 // If you want to request audio permission automatically here (not recommended),
                 // you could do that by casting LocalContext to MainActivity and calling the helper:
                 // (LocalContext.current as? MainActivity)?.requestAudioPermissionIfNeeded()
@@ -193,7 +235,13 @@ fun AppNavigation() {
                 // I avoided automatic permission prompts to respect UX best-practices; instead
                 // ChatScreen/startVoiceCoach checks permissions and prompts user or sets status.
 
-                ChatScreen(viewModel = chatViewModel, startInVoiceMode = startVoice)
+                ChatScreen(
+                    viewModel = chatViewModel,
+                    startInVoiceMode = startVoice,
+                    onNavigateToVoice = {
+                        // Already in voice mode, no need to navigate
+                    }
+                )
             }
         }
     }
@@ -204,16 +252,19 @@ fun BottomBar(
     navController: NavHostController,
     routes: List<String>
 ) {
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    // Dynamic label based on route - show "Voice" if voice mode, otherwise "Chat"
+    val chatLabel = if (currentRoute?.contains("start_voice=true") == true) "Voice" else "Chat"
+
     val items = listOf(
         NavigationItem(route = routes[0], label = "Home", icon = Icons.Default.Home),
-        NavigationItem(route = routes[1], label = "AI Chat", icon = Icons.Default.Chat),
-        NavigationItem(route = routes[2], label = "SMS\nAnalysis", icon = Icons.Default.Analytics),
+        NavigationItem(route = routes[1], label = chatLabel, icon = Icons.Default.Chat),
+        NavigationItem(route = routes[2], label = "Analysis", icon = Icons.Default.Analytics),
         NavigationItem(route = routes[3], label = "Cash Flow", icon = Icons.Default.MonetizationOn),
         NavigationItem(route = routes[4], label = "Models", icon = Icons.Default.Settings)
     )
-
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
 
     NavigationBar(modifier = Modifier.navigationBarsPadding()) {
         items.forEach { item ->

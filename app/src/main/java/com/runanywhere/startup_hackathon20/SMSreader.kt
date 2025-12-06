@@ -105,7 +105,8 @@ fun readSmsInbox(context: Context, limit: Int = 3000, daysLookBack: Int? = null)
 
             // Check amount presence (INR/Rs/₹ pattern)
             val amountMatcher = amountPattern.matcher(body)
-            val hasAmount = amountMatcher.find() || anyNumberPattern.matcher(body).find().and(hasTransactionVerb) // require verb for pure numeric fallback
+            val hasAmount = amountMatcher.find() || (anyNumberPattern.matcher(body)
+                .find() && hasTransactionVerb) // require verb for pure numeric fallback
 
             // Sender heuristics
             val senderIsBusiness = isBusinessSenderStrict(rawAddress, bankTokens)

@@ -199,18 +199,9 @@ fun Dashboard(navController: NavController, viewModel: ChatViewModel) {
                     icon = Icons.Default.VoiceChat,
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                     onClick = {
-                        // If RECORD_AUDIO is already granted -> navigate to chat in voice mode.
-                        // Otherwise ask MainActivity to request it (the Activity will show the system dialog).
-                        val hasPermission = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-
-                        if (hasPermission) {
+                        // Request audio permission and navigate only after it's granted
+                        (context as? MainActivity)?.requestAudioPermissionIfNeeded {
                             navController.navigate("chat?start_voice=true")
-                        } else {
-                            // Ask the Activity to request permission via the registered launcher.
-                            (context as? MainActivity)?.requestAudioPermissionIfNeeded()
                         }
                     }
                 )

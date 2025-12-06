@@ -68,26 +68,18 @@ class MyApplication : Application() {
 
     private suspend fun registerModels() {
         try {
-            // Register a small model for testing (SmolLM2 360M - 119MB)
-            addModelFromURL(
-                url = "https://huggingface.co/prithivMLmods/SmolLM2-360M-GGUF/resolve/main/SmolLM2-360M.Q8_0.gguf",
-                name = "SmolLM2 360M Q8_0",
-                type = "LLM"
-            )
-            Log.d("MyApplication", "Registered SmolLM2 360M model")
-
-            // Register another small model (Qwen 2.5 0.5B - 374MB)
+            // Register Qwen 2.5 0.5B - Fast, accurate, recommended for most users (374MB)
             addModelFromURL(
                 url = "https://huggingface.co/Triangle104/Qwen2.5-0.5B-Instruct-Q6_K-GGUF/resolve/main/qwen2.5-0.5b-instruct-q6_k.gguf",
-                name = "Qwen 2.5 0.5B Instruct Q6_K",
+                name = "Qwen 2.5 0.5B Instruct",
                 type = "LLM"
             )
             Log.d("MyApplication", "Registered Qwen 2.5 0.5B model")
 
-            // Register Llama 3.2 1B model (815MB)
+            // Register Llama 3.2 1B - Best quality, slower (815MB)
             addModelFromURL(
                 url = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K_L.gguf",
-                name = "Llama 3.2 1B Instruct Q6_K",
+                name = "Llama 3.2 1B Instruct",
                 type = "LLM"
             )
             Log.d("MyApplication", "Registered Llama 3.2 1B model")

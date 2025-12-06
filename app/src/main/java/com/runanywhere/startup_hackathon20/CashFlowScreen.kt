@@ -70,12 +70,17 @@ fun CashFlowScreen(viewModel: ChatViewModel = viewModel()) {
                     // Voice summary button
                     if (cashFlowPrediction != null) {
                         IconButton(
-                            onClick = { viewModel.speakCashFlowSummary() },
-                            enabled = !isSpeaking
+                            onClick = {
+                                if (isSpeaking) {
+                                    viewModel.stopSpeaking()
+                                } else {
+                                    viewModel.speakCashFlowSummary()
+                                }
+                            }
                         ) {
                             Icon(
                                 imageVector = if (isSpeaking) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                                contentDescription = "Voice Summary",
+                                contentDescription = if (isSpeaking) "Stop Voice" else "Voice Summary",
                                 tint = if (isSpeaking)
                                     MaterialTheme.colorScheme.primary
                                 else
@@ -600,7 +605,7 @@ private fun MoneyFlowRow(prediction: CashFlowPrediction, locale: Locale) {
             title = "Income",
             amount = prediction.totalIncome,
             locale = locale,
-            icon = Icons.Default.ArrowUpward,
+            icon = Icons.Default.ArrowDownward,
             color = Color(0xFF00C853),
             isPositive = true
         )
@@ -611,7 +616,7 @@ private fun MoneyFlowRow(prediction: CashFlowPrediction, locale: Locale) {
             title = "Expenses",
             amount = prediction.totalExpenses,
             locale = locale,
-            icon = Icons.Default.ArrowDownward,
+            icon = Icons.Default.ArrowUpward,
             color = Color(0xFFFF5252),
             isPositive = false
         )
@@ -826,13 +831,17 @@ private fun FinancialHealthCard(prediction: CashFlowPrediction) {
         ((prediction.netCashFlow / prediction.totalIncome) * 100)
     } else 0.0
 
-    val (healthLabel, healthColor, healthEmoji, healthMessage) = when {
+    val healthData = when {
         savingsRate >= 30 -> listOf("Excellent", Color(0xFF4CAF50), "🏆", "Savings champion!")
         savingsRate >= 20 -> listOf("Good", Color(0xFF66BB6A), "💪", "Keep it up!")
         savingsRate >= 10 -> listOf("Fair", Color(0xFFFFA726), "📈", "Room to improve")
         savingsRate >= 0 -> listOf("Needs Work", Color(0xFFEF5350), "🎯", "Let's optimize")
         else -> listOf("Critical", Color(0xFFD32F2F), "⚠️", "Action needed!")
     }
+    val healthLabel = healthData[0] as String
+    val healthColor = healthData[1] as Color
+    val healthEmoji = healthData[2] as String
+    val healthMessage = healthData[3] as String
 
     Card(
         modifier = Modifier.fillMaxWidth(),

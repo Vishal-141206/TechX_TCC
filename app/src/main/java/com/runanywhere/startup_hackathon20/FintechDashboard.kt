@@ -77,7 +77,7 @@ fun FintechDashboard(navController: NavController, viewModel: ChatViewModel) {
                     text = "Quick Actions",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                     color = OnBackground
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -92,7 +92,7 @@ fun FintechDashboard(navController: NavController, viewModel: ChatViewModel) {
                         text = "Financial Insights",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 20.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp),
                         color = OnBackground
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -115,7 +115,7 @@ fun FintechDashboard(navController: NavController, viewModel: ChatViewModel) {
                         text = "Activity Overview",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 20.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp),
                         color = OnBackground
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -137,7 +137,7 @@ fun FintechDashboard(navController: NavController, viewModel: ChatViewModel) {
                     text = "Explore Features",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                     color = OnBackground
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -157,7 +157,7 @@ private fun PremiumTopBar() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -165,7 +165,7 @@ private fun PremiumTopBar() {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Lock icon for security
+                // Shield icon for security
                 Box(
                     modifier = Modifier
                         .size(36.dp)
@@ -173,7 +173,7 @@ private fun PremiumTopBar() {
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Lock,
+                        imageVector = Icons.Default.Shield,
                         contentDescription = "Secure",
                         tint = Color(0xFF4CAF50),
                         modifier = Modifier.size(18.dp)
@@ -183,7 +183,7 @@ private fun PremiumTopBar() {
                 Column {
                     Text(
                         text = "Finance AI",
-                        style = MaterialTheme.typography.headlineSmall,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = OnSurface
                     )
@@ -192,7 +192,7 @@ private fun PremiumTopBar() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Shield,
+                            imageVector = Icons.Default.Lock,
                             contentDescription = null,
                             tint = Color(0xFF4CAF50),
                             modifier = Modifier.size(11.dp)
@@ -209,20 +209,7 @@ private fun PremiumTopBar() {
                 }
             }
 
-            // Profile Icon with encrypted indicator
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(PrimaryContainer, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "Profile",
-                    tint = Primary,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
+
         }
     }
 }
@@ -237,7 +224,7 @@ private fun PremiumBalanceCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp)
+            .padding(horizontal = 16.dp)
             .height(200.dp)
             .clickable(onClick = onCardClick),
         shape = RoundedCornerShape(24.dp),
@@ -255,7 +242,7 @@ private fun PremiumBalanceCard(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
+                    .padding(20.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 // Header
@@ -326,7 +313,7 @@ private fun PremiumBalanceCard(
 @Composable
 private fun QuickActionsRow(navController: NavController) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(getQuickActions()) { action ->
@@ -405,7 +392,7 @@ private fun InsightsSection(
     }
 
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(insights.take(5)) { insight ->
@@ -494,12 +481,12 @@ private fun ActivityStatsCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -544,7 +531,7 @@ private fun StatColumn(value: String, label: String, color: Color) {
 @Composable
 private fun FeaturesGrid(navController: NavController) {
     Column(
-        modifier = Modifier.padding(horizontal = 20.dp),
+        modifier = Modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(

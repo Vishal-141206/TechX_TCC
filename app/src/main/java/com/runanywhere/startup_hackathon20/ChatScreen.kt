@@ -26,7 +26,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -37,7 +39,13 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean = false) {
+fun ChatScreen(
+    viewModel: ChatViewModel = viewModel(),
+    startInVoiceMode: Boolean = false,
+    onNavigateToVoice: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val mainActivity = remember { context as? MainActivity }
     val messages by viewModel.messages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val modelStatus by viewModel.modelStatus.collectAsState()
@@ -46,14 +54,12 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
     val currentModelId by viewModel.currentModelId.collectAsState()
     val liveTranscript by viewModel.liveTranscript.collectAsState()  // Live transcript
 
-    val context = LocalContext.current
-
     // local UI state
     var inputText by remember { mutableStateOf("") }
     var showSuggestedQuestions by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
-    // Suggested questions for financial assistant (finance coach style)
+    // Suggested questions for financial assistant
     val suggestedQuestions = listOf(
         "How to save ₹50,000 in 6 months?",
         "What's the 50-30-20 budget rule?",
@@ -75,7 +81,8 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
         if (startInVoiceMode) {
             viewModel.initializeVoice(context)
             delay(500)  // Increased delay to ensure initialization
-            // Check permission before starting
+
+            // Check permission before starting - if not granted, request it
             val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
                 context,
                 android.Manifest.permission.RECORD_AUDIO
@@ -83,6 +90,12 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
 
             if (hasPermission) {
                 viewModel.startVoiceCoach(context)
+            } else {
+                // Request permission from MainActivity
+                (context as? MainActivity)?.requestAudioPermissionIfNeeded {
+                    // Permission granted - start voice coach
+                    viewModel.startVoiceCoach(context)
+                }
             }
         }
     }
@@ -119,7 +132,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Psychology,
+                                imageVector = if (startInVoiceMode) Icons.Default.RecordVoiceOver else Icons.Default.Psychology,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(22.dp)
@@ -128,9 +141,10 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
 
                         Column {
                             Text(
-                                text = if (startInVoiceMode) "Voice Coach" else "AI Assistant",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
+                                text = if (startInVoiceMode) "Voice Coach" else "AI Chat Assistant",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
                             )
 
                             Row(
@@ -150,7 +164,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
 
                                     currentModelId != null -> {
                                         Icon(
-                                            imageVector = Icons.Default.Lock,
+                                            imageVector = Icons.Default.Shield,
                                             contentDescription = null,
                                             tint = Color(0xFF4CAF50),
                                             modifier = Modifier.size(12.dp)
@@ -250,9 +264,27 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
                     lastUserMessage = lastUserMsg,
                     lastAiResponse = lastAiMsg,
                     onMicToggle = {
-                        if (isVoiceListening) viewModel.stopVoiceCoach() else viewModel.startVoiceCoach(
-                            context
-                        )
+                        if (isVoiceListening) {
+                            viewModel.stopVoiceCoach()
+                        } else {
+                            // Check permission before starting
+                            val hasPermission =
+                                androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.RECORD_AUDIO
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                            if (hasPermission) {
+                                viewModel.startVoiceCoach(context)
+                            } else {
+                                (context as? MainActivity)?.requestAudioPermissionIfNeeded {
+                                    viewModel.startVoiceCoach(context)
+                                }
+                            }
+                        }
+                    },
+                    onStopSpeaking = {
+                        viewModel.stopSpeaking()
                     }
                 )
             }
@@ -315,9 +347,24 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
                     isSpeaking = isSpeaking,
                     hasMessages = messages.isNotEmpty(),
                     onMicToggle = {
-                        if (isVoiceListening) viewModel.stopVoiceCoach() else viewModel.startVoiceCoach(
-                            context
-                        )
+                        if (isVoiceListening) {
+                            viewModel.stopVoiceCoach()
+                        } else {
+                            // Check permission before starting
+                            val hasPermission =
+                                androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.RECORD_AUDIO
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                            if (hasPermission) {
+                                viewModel.startVoiceCoach(context)
+                            } else {
+                                (context as? MainActivity)?.requestAudioPermissionIfNeeded {
+                                    viewModel.startVoiceCoach(context)
+                                }
+                            }
+                        }
                     },
                     onStopSpeaking = {
                         viewModel.stopSpeaking()
@@ -335,7 +382,6 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .navigationBarsPadding()
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -356,7 +402,9 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel(), startInVoiceMode: Boolean
                                     Text(
                                         text = if (currentModelId == null) "Load a model first..."
                                         else "Type a message...",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                            alpha = 0.6f
+                                        )
                                     )
                                 },
                                 maxLines = 4,
@@ -417,7 +465,8 @@ private fun VoiceHeroCard(
     liveTranscript: String,
     lastUserMessage: String,
     lastAiResponse: String,
-    onMicToggle: () -> Unit
+    onMicToggle: () -> Unit,
+    onStopSpeaking: () -> Unit
 ) {
     // Google Assistant style animations
     val infiniteTransition = rememberInfiniteTransition(label = "voice")
@@ -582,6 +631,29 @@ private fun VoiceHeroCard(
                         color = Color.White.copy(alpha = 0.8f),
                         textAlign = TextAlign.Center
                     )
+
+                    // Stop Speaking button - visible when AI is speaking
+                    if (isSpeaking) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        FilledTonalButton(
+                            onClick = onStopSpeaking,
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color.White.copy(alpha = 0.9f),
+                                contentColor = Color(0xFFEA4335)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Stop,
+                                contentDescription = "Stop Speaking",
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Stop Speaking",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -624,10 +696,12 @@ private fun VoiceHeroCard(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // AI Response Card - Clean design
+        // AI Response Card - Clean design with scroll
         if ((isSpeaking || (!isListening && !isLoading)) && lastAiResponse.isNotBlank() && liveTranscript.isBlank()) {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp),  // Max height to prevent overflow
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -637,6 +711,7 @@ private fun VoiceHeroCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())  // Make scrollable
                         .padding(20.dp)
                 ) {
                     Row(
@@ -656,7 +731,7 @@ private fun VoiceHeroCard(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Default.Psychology,
+                                Icons.Default.RecordVoiceOver,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(24.dp)
@@ -819,24 +894,10 @@ private fun VoiceControlsBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Stop speaking button (only when AI is speaking)
-                if (isSpeaking) {
-                    FilledTonalIconButton(
-                        onClick = onStopSpeaking,
-                        modifier = Modifier.size(56.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Stop,
-                            contentDescription = "Stop Speaking",
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-
-                // Main mic button
+                // Main mic button (centered)
                 FilledIconButton(
                     onClick = onMicToggle,
                     modifier = Modifier.size(72.dp),
@@ -858,11 +919,6 @@ private fun VoiceControlsBar(
                         modifier = Modifier.size(36.dp),
                         tint = if (isListening || isSpeaking) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-
-                // Placeholder for symmetry when speaking
-                if (isSpeaking) {
-                    Spacer(modifier = Modifier.size(56.dp))
                 }
             }
 
@@ -910,7 +966,7 @@ private fun EmptyStateView(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Psychology,
+                imageVector = if (startInVoiceMode) Icons.Default.RecordVoiceOver else Icons.Default.Psychology,
                 contentDescription = null,
                 tint = Color.White,
                 modifier = Modifier.size(60.dp)
@@ -919,24 +975,31 @@ private fun EmptyStateView(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Text(
-            text = if (startInVoiceMode) "Voice Finance Coach" else "Your AI Financial Assistant",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
+        if (startInVoiceMode) {
+            Text(
+                text = "Voice Finance Coach",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-        Text(
-            text = if (startInVoiceMode)
-                "Speak naturally and get instant financial advice"
-            else
-                "Ask me anything about budgeting, saving, or investing",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
+            Text(
+                text = "Speak naturally and get instant financial advice",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        } else {
+            Text(
+                text = "Your financial AI assistant for budgeting, saving, and investing...",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                fontSize = 17.sp
+            )
+        }
 
         // Security Badge
         Spacer(modifier = Modifier.height(20.dp))
@@ -945,35 +1008,36 @@ private fun EmptyStateView(
             colors = CardDefaults.cardColors(
                 containerColor = Color(0xFF4CAF50).copy(alpha = 0.1f)
             ),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.wrapContentWidth()
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Default.Shield,
+                    imageVector = Icons.Default.Lock,
                     contentDescription = null,
                     tint = Color(0xFF4CAF50),
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(22.dp)
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Column(horizontalAlignment = Alignment.Start) {
                     Text(
                         text = "100% Private & Secure",
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF4CAF50),
                         maxLines = 1
                     )
                     Text(
                         text = "Conversations stay on your device",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
+                        maxLines = 1,
+                        fontSize = 11.sp
                     )
                 }
             }
@@ -1105,7 +1169,7 @@ private fun TypingIndicator() {
             )
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -1155,7 +1219,7 @@ fun MessageBubble(message: ChatMessage, context: android.content.Context) {
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
                     // Message text
                     Text(

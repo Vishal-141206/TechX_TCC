@@ -44,10 +44,10 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("AI Model Management")
+                        Text("AI Model Management", fontWeight = FontWeight.Bold)
                         Text(
                             "On-Device AI Models",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.secondary
                         )
                     }
@@ -60,33 +60,66 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // Current Model Card
+            currentModelId?.let { loadedModelId ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Active",
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Currently Loaded",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = availableModels.find { it.id == loadedModelId }?.name
+                                    ?: loadedModelId,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+
             // Status Card
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = when {
-                        modelStatus.contains("Error", ignoreCase = true) ->
-                            MaterialTheme.colorScheme.errorContainer
-                        modelStatus.contains("No models", ignoreCase = true) ->
-                            MaterialTheme.colorScheme.surfaceVariant
-                        else -> MaterialTheme.colorScheme.surfaceVariant
-                    }
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
                 ),
-                shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "Status",
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Bold
                     )
-
                     Spacer(modifier = Modifier.height(8.dp))
-
                     Text(
                         text = modelStatus,
                         style = MaterialTheme.typography.bodyMedium,
@@ -96,99 +129,37 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                     downloadProgress?.let { progress ->
                         Spacer(modifier = Modifier.height(12.dp))
                         LinearProgressIndicator(
-                            progress = progress.coerceIn(0f, 1f),
+                            progress = { progress.coerceIn(0f, 1f) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(8.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            color = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Downloading",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${(progress * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Current Model Info
-            currentModelId?.let { loadedModelId ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Loaded",
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                        Text(
+                            text = "${(progress * 100).toInt()}% downloaded",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Model Loaded",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = availableModels.find { it.id == loadedModelId }?.name ?: loadedModelId,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
                     }
                 }
             }
 
-            // Actions Row
-            Row(
+            // Refresh Button
+            Button(
+                onClick = { viewModel.refreshModels() },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                enabled = !isLoading
             ) {
-                Button(
-                    onClick = { viewModel.refreshModels() },
-                    modifier = Modifier.weight(1f),
-                    enabled = !isLoading
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "Refresh",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Refresh Models")
-                }
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Refresh Models")
             }
 
-            // Model List or Empty State
+            // Model List
             if (isLoading) {
                 Box(
                     modifier = Modifier
@@ -196,24 +167,7 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                         .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Fetching available models...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Make sure you're connected to the internet",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
+                    CircularProgressIndicator()
                 }
             } else if (availableModels.isEmpty()) {
                 Box(
@@ -222,64 +176,40 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                         .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Default.WifiOff,
-                            contentDescription = "No Models",
+                            contentDescription = null,
                             modifier = Modifier.size(64.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "No AI Models Found",
+                            "No Models Available",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Possible reasons:",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "• Check your internet connection\n• Make sure you have RunAnywhere SDK configured\n• Models may be downloading for the first time",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            "Check your internet connection",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = { viewModel.refreshModels() },
-                            modifier = Modifier.width(200.dp)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Retry")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Try Again")
-                        }
                     }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(availableModels) { model ->
-                        val isDownloadingForThisModel = downloadingModelId == model.id
-                        val progressForThisModel = if (isDownloadingForThisModel) downloadProgress else null
-                        val isDownloaded = model.isDownloaded || downloadedModels.contains(model.id)
-
                         ModelItem(
                             model = model,
                             isLoaded = model.id == currentModelId,
-                            isDownloaded = isDownloaded,
-                            isDownloading = isDownloadingForThisModel,
-                            downloadProgress = progressForThisModel,
+                            isDownloaded = model.isDownloaded || downloadedModels.contains(model.id),
+                            isDownloading = downloadingModelId == model.id,
+                            downloadProgress = if (downloadingModelId == model.id) downloadProgress else null,
                             onDownload = { viewModel.downloadModel(model.id) },
                             onCancelDownload = { viewModel.cancelDownload() },
                             onLoad = { viewModel.loadModel(model.id) }
@@ -297,7 +227,7 @@ fun ModelItem(
     isLoaded: Boolean,
     isDownloaded: Boolean,
     isDownloading: Boolean,
-    downloadProgress: Float?, // null when not downloading this model
+    downloadProgress: Float?,
     onDownload: () -> Unit,
     onCancelDownload: () -> Unit,
     onLoad: () -> Unit
@@ -310,153 +240,214 @@ fun ModelItem(
             else
                 MaterialTheme.colorScheme.surface
         ),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(20.dp),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isLoaded) 4.dp else 2.dp
-        ),
-        border = if (isLoaded) CardDefaults.outlinedCardBorder() else null
+            defaultElevation = if (isLoaded) 8.dp else 2.dp
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Model Name and ID
-            Text(
-                model.name,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (isLoaded)
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                else
-                    MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                "ID: ${model.id}",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isLoaded)
-                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                else
-                    MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Actions Row
+        Column(modifier = Modifier.padding(24.dp)) {
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when {
+                            model.name.contains("Qwen", ignoreCase = true) -> "Qwen 2.5 (0.5B)"
+                            model.name.contains("Llama", ignoreCase = true) -> "Llama 3.2 (1B)"
+                            else -> model.name
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isLoaded)
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        else
+                            MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = when {
+                            model.name.contains("Qwen", ignoreCase = true) -> "Recommended"
+                            model.name.contains("Llama", ignoreCase = true) -> "Best Quality"
+                            else -> "Available"
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isLoaded)
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = when {
+                            model.name.contains(
+                                "Qwen",
+                                ignoreCase = true
+                            ) -> "374MB • Fast & Accurate"
+
+                            model.name.contains(
+                                "Llama",
+                                ignoreCase = true
+                            ) -> "815MB • Premium Model"
+
+                            else -> "Size: Unknown"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isLoaded)
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                }
+
+                // Status Badge
                 if (isLoaded) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    ) {
+                        Text(
+                            text = "ACTIVE",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                } else if (isDownloaded) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                    ) {
+                        Text(
+                            text = "READY",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Download Progress
+            if (isDownloading && downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = { downloadProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Downloading ${(downloadProgress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // Action Button
+            when {
+                isLoaded -> {
+                    // Already active
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Default.CheckCircle,
-                            contentDescription = "Loaded",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            "Loaded & Ready",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1
+                            "This model is currently active",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Medium
                         )
                     }
-                } else {
-                    // Show download button or cancel button based on state
-                    if (isDownloading) {
-                        // Cancel button when downloading
-                        OutlinedButton(
-                            onClick = onCancelDownload,
-                            modifier = Modifier.width(140.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                if (downloadProgress != null) {
-                                    CircularProgressIndicator(
-                                        progress = downloadProgress.coerceIn(0f, 1f),
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                } else {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Cancel", color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    } else {
-                        // Download button - disabled if already downloaded
-                        OutlinedButton(
-                            onClick = onDownload,
-                            enabled = !isDownloaded,
-                            modifier = Modifier.width(140.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                if (isDownloaded) {
-                                    Icon(
-                                        Icons.Default.CheckCircle,
-                                        contentDescription = "Downloaded",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.secondary
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Downloaded")
-                                } else {
-                                    Icon(
-                                        Icons.Default.Download,
-                                        contentDescription = "Download",
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Download")
-                                }
-                            }
-                        }
+                }
+
+                isDownloading -> {
+                    // Show cancel
+                    OutlinedButton(
+                        onClick = onCancelDownload,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            "Cancel Download",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
+                }
 
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    // Load button - only enabled if downloaded and not currently loading
+                isDownloaded -> {
+                    // Show load button
                     Button(
                         onClick = onLoad,
-                        modifier = Modifier.width(100.dp),
-                        enabled = isDownloaded && !isDownloading,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                Icons.Default.PlayArrow,
-                                contentDescription = "Load",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Load")
-                        }
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            "Load Model",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                else -> {
+                    // Show download button
+                    Button(
+                        onClick = onDownload,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            "Download Model",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
