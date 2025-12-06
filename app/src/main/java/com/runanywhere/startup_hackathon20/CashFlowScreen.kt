@@ -20,10 +20,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import java.util.*
+import java.util.Locale
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.navigationBarsPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -278,7 +276,8 @@ fun CashFlowScreen(viewModel: ChatViewModel = viewModel()) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.error
-                                }
+                                },
+                                modifier = Modifier.weight(1f)
                             )
 
                             MetricCard(
@@ -291,11 +290,13 @@ fun CashFlowScreen(viewModel: ChatViewModel = viewModel()) {
                                     )
                                 } else "100%",
                                 color = if (prediction.totalIncome > 0 &&
-                                    (prediction.totalExpenses / prediction.totalIncome * 100) <= 80) {
+                                    (prediction.totalExpenses / prediction.totalIncome * 100) <= 80
+                                ) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.error
-                                }
+                                },
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
@@ -456,8 +457,16 @@ fun CategorySpendCard(category: String, amount: Double, locale: Locale) {
                     .size(12.dp)
                     .background(
                         color = when {
-                            category.contains("Food", ignoreCase = true) -> MaterialTheme.colorScheme.error
-                            category.contains("Shopping", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                            category.contains(
+                                "Food",
+                                ignoreCase = true
+                            ) -> MaterialTheme.colorScheme.error
+
+                            category.contains(
+                                "Shopping",
+                                ignoreCase = true
+                            ) -> MaterialTheme.colorScheme.error
+
                             else -> MaterialTheme.colorScheme.primary
                         },
                         shape = CircleShape

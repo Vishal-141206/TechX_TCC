@@ -20,7 +20,6 @@ import kotlinx.coroutines.*
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -119,19 +118,32 @@ class VoiceManager(private val context: Context) {
             return
         }
         onSpeechCompleted = onCompleted
-        stop() // flush any pending speech
+        // flush any pending speech
+        try {
+            textToSpeech?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "TTS stop before speak failed: ${e.message}")
+        }
         textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice_utterance")
     }
 
     fun stop() {
-        textToSpeech?.stop()
+        try {
+            textToSpeech?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "TTS stop exception: ${e.message}", e)
+        }
         onSpeechCompleted?.invoke()
         onSpeechCompleted = null
     }
 
     fun shutdown() {
         stopListening()
-        textToSpeech?.shutdown()
+        try {
+            textToSpeech?.shutdown()
+        } catch (e: Exception) {
+            Log.w(TAG, "TTS shutdown exception: ${e.message}", e)
+        }
         textToSpeech = null
         isTtsInitialized = false
         scope.cancel()
@@ -368,6 +380,7 @@ class VoiceManager(private val context: Context) {
         modelJob = scope.launch(Dispatchers.IO) {
             val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
             val bufferSize = max(minBuffer, (SAMPLE_RATE * BUFFER_MS / 1000) * 2) // bytes (16-bit)
+            @Suppress("MissingPermission")
             try {
                 audioRecord = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
@@ -383,7 +396,25 @@ class VoiceManager(private val context: Context) {
                     return@launch
                 }
 
-                audioRecord?.startRecording()
+                @Suppress("MissingPermission")
+                try {
+                    audioRecord?.startRecording()
+                } catch (se: SecurityException) {
+                    Log.e(TAG, "startRecording SecurityException: ${se.message}", se)
+                    withContext(Dispatchers.Main) {
+                        onModelError("Permission denied for audio recording")
+                        onStopped()
+                    }
+                    return@launch
+                } catch (e: Exception) {
+                    Log.e(TAG, "startRecording failed: ${e.message}", e)
+                    withContext(Dispatchers.Main) {
+                        onModelError("Audio start failed: ${e.message}")
+                        onStopped()
+                    }
+                    return@launch
+                }
+
                 isModelListening = true
                 Log.d(TAG, "Model ASR: recording started (sr=$SAMPLE_RATE)")
 
@@ -394,7 +425,7 @@ class VoiceManager(private val context: Context) {
                 var interimSent = false
 
                 while (isActive && isModelListening) {
-                    val read = audioRecord?.read(byteBuf, 0, byteBuf.size) ?: 0
+                    val read = try { audioRecord?.read(byteBuf, 0, byteBuf.size) ?: 0 } catch (e: Exception) { 0 }
                     if (read > 0) {
                         // compute RMS for silence detection
                         var sum = 0L
@@ -413,7 +444,7 @@ class VoiceManager(private val context: Context) {
                             if (!interimSent && pcmAccumulator.size > SAMPLE_RATE * 2 / 5) {
                                 interimSent = true
                                 val interimBytes = pcmAccumulator.toByteArray()
-                                launchModelTranscribe(interimBytes) { interimText, err ->
+                                launchModelTranscribe(interimBytes) { interimText, _ ->
                                     if (interimText != null) {
                                         scope.launch(Dispatchers.Main) { onPartial(interimText) }
                                     }
@@ -434,16 +465,13 @@ class VoiceManager(private val context: Context) {
                                 // Reset timers for next utterance (continue listening if continuous)
                                 startTs = System.currentTimeMillis()
                                 lastSpeechTs = startTs
-                                // continue loop to keep listening unless user stopped
                                 if (userRequestedStop) {
                                     Log.d(TAG, "User requested stop; terminating model ASR loop.")
                                     break
                                 }
-                                // continue listening for next utterance (no break)
+                                // continue listening for next utterance
                             } else {
                                 withContext(Dispatchers.Main) { onModelError(modelErr ?: "Model ASR failure") }
-                                // If model fails, fall back to platform ASR by calling onModelError (caller will do fallback)
-                                // Stop model ASR loop
                                 isModelListening = false
                                 break
                             }
@@ -494,9 +522,6 @@ class VoiceManager(private val context: Context) {
             Pair(null, "Model ASR invocation failed: ${inv.message}")
         }
     }
-
-    // convenience
-    private fun ByteArray.toByteArray(): ByteArray = this
 
     // cleanup
     fun onDestroy() {

@@ -1,3 +1,62 @@
 <resources>
     <string name="app_name">Personal Finance Manager</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">Finance AI</string>
+    <string name="dashboard_subtitle">100% On-Device • Privacy First</string>
+    <string name="dashboard_overview">Overview</string>
+
+    <!-- Model Management -->
+    <string name="model_status">Status</string>
+    <string name="model_loaded">Model Loaded</string>
+    <string name="no_models_found">No AI Models Found</string>
+    <string name="refresh_models">Refresh Models</string>
+    <string name="downloading">Downloading</string>
+    <string name="download">Download</string>
+    <string name="load">Load</string>
+
+    <!-- SMS Analysis -->
+    <string name="sms_analysis">SMS Analysis</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="refresh_sms">Refresh SMS</string>
+    <string name="importing">Importing…</string>
+    <string name="process_all">Process All &amp; Check Scams</string>
+    <string name="no_sms_imported">No SMS imported yet.\nTap \'Grant Permissions\' to start.</string>
+
+    <!-- Chat -->
+    <string name="ai_chat_assistant">AI Chat Assistant</string>
+    <string name="voice_finance_coach">Voice Finance Coach</string>
+    <string name="ask_about_finances">Ask about your finances…</string>
+    <string name="send">Send</string>
+    <string name="thinking">Thinking…</string>
+
+    <!-- Cash Flow -->
+    <string name="cash_flow_summary">Cash Flow Summary</string>
+    <string name="predict_cash_flow">Predict Cash Flow</string>
+    <string name="predicting">Predicting…</string>
+    <string name="voice_summary">Voice Summary</string>
+
+    <!-- Common Actions -->
+    <string name="parse">Parse</string>
+    <string name="check_scam">Check Scam</string>
+    <string name="edit">Edit</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="stop">Stop</string>
+    <string name="retry">Try Again</string>
+
+    <!-- Status Messages -->
+    <string name="scam_check_not_checked">Scam Check: Not checked</string>
+    <string name="scam_check_checking">Scam Check: Checking…</string>
+    <string name="scam_check_likely_scam">Scam Check: Likely Scam</string>
+    <string name="scam_check_safe">Scam Check: Safe</string>
+    <string name="scam_check_uncertain">Scam Check: Uncertain</string>
+    <string name="scam_check_error">Scam Check: Error</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dash\nboard</string>
+    <string name="nav_ai_chat">AI Chat</string>
+    <string name="nav_sms_analysis">SMS\nAnalysis</string>
+    <string name="nav_cash_flow">Cash Flow\nSummary</string>
+    <string name="nav_models">Models</string>
 </resources>

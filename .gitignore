@@ -1,5 +1,6 @@
 # Built application files
 *.apk
+*.aar
 *.ap_
 *.aab
 
@@ -42,20 +43,14 @@ captures/
 .idea/assetWizardSettings.xml
 .idea/dictionaries
 .idea/libraries
-.idea/jarRepositories.xml
+# Android Studio 3 in .gitignore file.
 .idea/caches
 .idea/modules.xml
+# Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
-.idea/.name
-.idea/deploymentTargetSelector.xml
-
-# Keep these .idea files (commonly shared in teams)
-# !.idea/vcs.xml
-# !.idea/misc.xml
-# !.idea/compiler.xml
-# !.idea/runConfigurations.xml
 
 # Keystore files
+# Uncomment the following lines if you do not want to check your keystore files in.
 *.jks
 *.keystore
 
@@ -64,7 +59,7 @@ captures/
 .cxx/
 
 # Google Services (e.g. APIs or Firebase)
-google-services.json
+# google-services.json
 
 # Freeline
 freeline.py
@@ -86,14 +81,10 @@ lint/intermediates/
 lint/generated/
 lint/outputs/
 lint/tmp/
+# lint/reports/
 
 # Android Profiling
 *.hprof
-
-# Backup files
-*.bak
-*.bak2
-*~
 
 # OS-specific files
 .DS_Store
@@ -104,5 +95,18 @@ lint/tmp/
 ehthumbs.db
 Thumbs.db
 
-# Claude Code settings (if you want to keep local settings private)
-.claude/settings.local.json
+# Kotlin
+*.kt.swp
+
+# Firebase
+google-services.json
+GoogleService-Info.plist
+
+# Sensitive or production keys
+keystore.properties
+release.keystore
+debug.keystore
+
+# Backup files
+*.bak
+*~

@@ -46,8 +46,8 @@ class SmsReceiver : BroadcastReceiver() {
             "account", "rs.", "inr", "card"
         )
 
-        val senderLower = sender.toLowerCase()
-        val messageLower = message.toLowerCase()
+        val senderLower = sender.lowercase()
+        val messageLower = message.lowercase()
 
         // Check if sender contains bank keywords
         val commonBankSenders = listOf(

@@ -6,8 +6,9 @@ import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.data.models.SDKEnvironment
 import com.runanywhere.sdk.public.extensions.addModelFromURL
 import com.runanywhere.sdk.llm.llamacpp.LlamaCppServiceProvider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class MyApplication : Application() {
@@ -16,6 +17,9 @@ class MyApplication : Application() {
         lateinit var instance: MyApplication
             private set
     }
+
+    // Application-scoped coroutine scope
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -32,7 +36,7 @@ class MyApplication : Application() {
     }
 
     private fun initializeSDK() {
-        GlobalScope.launch(Dispatchers.IO) {
+        applicationScope.launch {
             try {
                 Log.d("MyApplication", "Initializing RunAnywhere SDK...")
 

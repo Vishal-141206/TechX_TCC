@@ -19,7 +19,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 // Simple Message Data Class for the Chat Interface
 data class ChatMessage(
@@ -197,10 +198,6 @@ class ChatViewModel : ViewModel() {
     // ============================================================================================
 
     /**
-     * Send a user message to the model.
-     * If speakResponse==true, the assistant's final reply will be spoken via VoiceManager.
-     */
-    /**
      * Send a text prompt to the model and stream back the assistant reply.
      * If speakResponse==true, the final assistant reply is spoken by VoiceManager.
      */
@@ -256,7 +253,7 @@ class ChatViewModel : ViewModel() {
                             viewModelScope.launch {
                                 delay(300L)
                                 // If voice coach mode is still desired and permission ok, restart.
-                                if (_isVoiceListening.value) {
+                                if (_isVoiceListening.value && appContext != null) {
                                     appContext?.let { ctx ->
                                         // startVoiceCoach will check permission and set states; it will attempt to start ASR again
                                         startVoiceCoach(ctx)
@@ -632,109 +629,6 @@ class ChatViewModel : ViewModel() {
         val lower = body.lowercase()
         return lower.contains("otp") || lower.contains("http") || lower.contains("click") || lower.contains("call") || lower.contains("urgent")
     }
-
-    // Put these inside ChatViewModel
-
-    // Helper wrapper: runs the model stream, collects tokens, and retries once with a stricter prompt if result is empty.
-// Returns final string (may be empty).
-    private suspend fun callModelWithRetries(userPrompt: String, maxWaitMs: Long = 45000L): String {
-        // Primary attempt: normal prompt
-        suspend fun runStream(prompt: String, timeoutMs: Long): String {
-            var acc = ""
-            try {
-                withTimeoutOrNull(timeoutMs) {
-                    RunAnywhere.generateStream(prompt).collect { token ->
-                        acc += token
-                    }
-                }
-            } catch (e: Exception) {
-                // keep acc and return (outer code will handle empty)
-            }
-            return acc.trim()
-        }
-
-        // 1) Normal attempt
-        val primary = runStream(userPrompt, maxWaitMs)
-
-        if (primary.isNotBlank()) {
-            // quick sanity: return as-is
-            android.util.Log.d("ChatViewModel", "Model primary response length=${primary.length}")
-            return primary
-        }
-
-        // 2) Retry with stricter prompt (deterministic hint + ask for short answer only)
-        val strictPrompt = buildString {
-            appendLine("STRICT OUTPUT: Answer concisely. Do NOT add any commentary or explanation.")
-            appendLine("If you are giving a multi-sentence answer, keep it to the essential facts.")
-            appendLine()
-            appendLine("User prompt:")
-            appendLine(userPrompt)
-            appendLine()
-            appendLine("REPLY:")
-        }
-
-        android.util.Log.w("ChatViewModel", "Primary model response empty — retrying with strict prompt")
-        val retry = runStream(strictPrompt, maxWaitMs / 2) // shorter retry timeout
-        if (retry.isNotBlank()) {
-            android.util.Log.d("ChatViewModel", "Model retry response length=${retry.length}")
-            return retry
-        }
-
-        // 3) final fallback - empty result but return empty string so callers can handle fallback heuristics
-        android.util.Log.e("ChatViewModel", "Model returned empty on both attempts")
-        return ""
-    }
-
-    // Robust sendMessage which streams partial tokens and retries/fallbacks when empty
-    fun sendMessage(text: String) {
-        if (_currentModelId.value == null) {
-            _messages.update { it + ChatMessage("Error: No AI model is loaded.", false) }
-            return
-        }
-        // push user message
-        _messages.update { it + ChatMessage(text, true, getCurrentTimestamp()) }
-
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                // Build your full prompt (system/role + user) if you use one. Small example:
-                val prompt = buildString {
-                    appendLine("You are a helpful, precise financial assistant. Be concise and factual.")
-                    appendLine()
-                    appendLine("User: $text")
-                }
-
-                // call wrapper that handles retries
-                val finalResponse = callModelWithRetries(prompt, maxWaitMs = 45000L)
-
-                if (finalResponse.isBlank()) {
-                    // fallback behavior: show polite failure + suggest action
-                    val fallback = "Sorry — I couldn't get a response from the model. Try again or load a different model."
-                    _messages.update { it + ChatMessage(fallback, false, getCurrentTimestamp()) }
-                } else {
-                    // If the model returned content, update messages.
-                    _messages.update { current ->
-                        val m = current.toMutableList()
-                        // If streaming partial assistant already exists, replace it; otherwise append
-                        if (m.lastOrNull()?.isUser == false) {
-                            m[m.lastIndex] = m.last().copy(text = finalResponse, timestamp = getCurrentTimestamp())
-                        } else {
-                            m.add(ChatMessage(finalResponse, false, getCurrentTimestamp()))
-                        }
-                        m.toList()
-                    }
-                }
-            } catch (e: Exception) {
-                _messages.update { it + ChatMessage("Error: ${e.message}", false, getCurrentTimestamp()) }
-                android.util.Log.e("ChatViewModel", "sendMessage exception: ${e.message}", e)
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-
-
-
 
     // ============================================================================================
     // SECTION 5: CASH FLOW PREDICTION (ROBUST)
