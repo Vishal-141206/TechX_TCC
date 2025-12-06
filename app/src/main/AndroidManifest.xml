@@ -15,6 +15,9 @@
     <!-- Audio permissions for voice coach -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Vibrate permission for haptic feedback -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Storage permissions for saving models and data -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />

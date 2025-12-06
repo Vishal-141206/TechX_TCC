@@ -153,30 +153,132 @@ class VoiceManager(private val context: Context) {
 
     // ---------------- Generators ----------------
     fun generateVoiceSummary(prediction: CashFlowPrediction): String {
-        return """
-            Cash Flow Summary:
-            Total Income: ₹${String.format(Locale.getDefault(), "%.2f", prediction.totalIncome)}
-            Total Expenses: ₹${String.format(Locale.getDefault(), "%.2f", prediction.totalExpenses)}
-            Net Cash Flow: ₹${String.format(Locale.getDefault(), "%.2f", prediction.netCashFlow)}
-            ${prediction.recommendation}
-        """.trimIndent()
+        val income = prediction.totalIncome.toInt()
+        val expenses = prediction.totalExpenses.toInt()
+        val netFlow = prediction.netCashFlow.toInt()
+        val predictedBalance = prediction.predictedBalance.toInt()
+
+        val savingsRate = if (income > 0) {
+            ((income - expenses).toDouble() / income * 100).toInt()
+        } else 0
+
+        val flowStatus = if (netFlow >= 0) "surplus" else "deficit"
+        val healthStatus = when {
+            savingsRate >= 30 -> "excellent"
+            savingsRate >= 20 -> "good"
+            savingsRate >= 10 -> "fair"
+            savingsRate >= 0 -> "needs improvement"
+            else -> "critical"
+        }
+
+        return buildString {
+            appendLine("Hello! Here's your 30-day financial forecast.")
+            appendLine()
+
+            // Income and expenses
+            append("Your total income is ${income} rupees, ")
+            appendLine("and your total expenses are ${expenses} rupees.")
+            appendLine()
+
+            // Net cash flow
+            if (netFlow >= 0) {
+                append("That gives you a positive cash flow of ${kotlin.math.abs(netFlow)} rupees. ")
+                appendLine("Great job managing your finances!")
+            } else {
+                append("This results in a deficit of ${kotlin.math.abs(netFlow)} rupees. ")
+                appendLine("You're spending more than you earn.")
+            }
+            appendLine()
+
+            // Savings rate
+            append("Your savings rate is $savingsRate percent, ")
+            appendLine("which is $healthStatus.")
+            appendLine()
+
+            // Predicted balance
+            if (predictedBalance >= 0) {
+                appendLine(
+                    "Your predicted balance for next month is ${
+                        kotlin.math.abs(
+                            predictedBalance
+                        )
+                    } rupees."
+                )
+            } else {
+                appendLine(
+                    "Warning: Your predicted balance shows a negative ${
+                        kotlin.math.abs(
+                            predictedBalance
+                        )
+                    } rupees."
+                )
+            }
+            appendLine()
+
+            // Smart recommendation
+            appendLine("My recommendation: ${prediction.recommendation}")
+            appendLine()
+            appendLine("Remember, small changes today lead to big results tomorrow. Keep it up!")
+        }.trimIndent()
     }
 
     fun generateTransactionSummary(totalMessages: Int, totalDebits: Double, totalCredits: Double): String {
-        return """
-            Transaction Summary:
-            Analyzed $totalMessages SMS messages.
-            Total Money Spent: ₹${String.format(Locale.getDefault(), "%.2f", totalDebits)}
-            Total Money Received: ₹${String.format(Locale.getDefault(), "%.2f", totalCredits)}
-            Net Balance Change: ₹${String.format(Locale.getDefault(), "%.2f", totalCredits - totalDebits)}
-        """.trimIndent()
+        val debits = totalDebits.toInt()
+        val credits = totalCredits.toInt()
+        val netChange = (totalCredits - totalDebits).toInt()
+
+        return buildString {
+            appendLine("I've analyzed $totalMessages financial messages for you.")
+            appendLine()
+
+            if (credits > 0) {
+                appendLine("You received a total of ${credits} rupees.")
+            }
+
+            if (debits > 0) {
+                appendLine("You spent ${debits} rupees during this period.")
+            }
+            appendLine()
+
+            if (netChange > 0) {
+                append("Your net balance increased by ${kotlin.math.abs(netChange)} rupees. ")
+                appendLine("You're building wealth steadily!")
+            } else if (netChange < 0) {
+                append("Your net balance decreased by ${kotlin.math.abs(netChange)} rupees. ")
+                appendLine("Consider reviewing your expenses.")
+            } else {
+                appendLine("Your income and expenses are perfectly balanced.")
+            }
+            appendLine()
+            appendLine("Would you like me to analyze spending patterns or suggest budget improvements?")
+        }.trimIndent()
     }
 
     fun generateScamAlert(scamCount: Int): String {
         return when {
-            scamCount == 0 -> "Great news! No scam messages detected in your SMS."
-            scamCount == 1 -> "Caution! Found 1 potential scam message. Please review your SMS carefully."
-            else -> "Alert! Found $scamCount potential scam messages. Please review your SMS immediately."
+            scamCount == 0 -> {
+                "Excellent news! I've analyzed all your messages and found zero scam attempts. " +
+                        "Your financial messages are secure. However, stay vigilant and never share OTPs or passwords."
+            }
+
+            scamCount == 1 -> {
+                "Alert! I've detected 1 suspicious message that could be a scam. " +
+                        "Please review it carefully. Remember, banks never ask for your PIN, OTP, or CVV via SMS. " +
+                        "If in doubt, contact your bank directly using their official number."
+            }
+
+            scamCount <= 3 -> {
+                "Warning! I found $scamCount potentially fraudulent messages. " +
+                        "These could be phishing attempts. Do not click any links or share personal information. " +
+                        "Delete these messages immediately and report them to your service provider."
+            }
+
+            else -> {
+                "Critical Alert! $scamCount scam messages detected. " +
+                        "This is a high number and suggests your number may be targeted. " +
+                        "Review and delete all suspicious messages, enable spam filters, and consider changing your number if this continues. " +
+                        "Report these to cyber crime authorities if needed."
+            }
         }
     }
 
@@ -281,7 +383,11 @@ class VoiceManager(private val context: Context) {
         }
 
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
-        val recognizer = speechRecognizer!!
+        val recognizer = speechRecognizer ?: run {
+            onError("Failed to create speech recognizer")
+            onStopped()
+            return
+        }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -314,14 +420,27 @@ class VoiceManager(private val context: Context) {
                 isPlatformListening = false
                 onError(msg)
 
-                if (continuousListening && !userRequestedStop) {
-                    // backoff then restart
+                // Only restart for non-fatal errors (not NO_MATCH or SPEECH_TIMEOUT)
+                val shouldRestart = continuousListening && !userRequestedStop &&
+                        error != SpeechRecognizer.ERROR_NO_MATCH &&
+                        error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+
+                if (shouldRestart) {
+                    // backoff then restart (longer delay to avoid rapid restarts)
                     scope.launch {
-                        delay(300L)
-                        if (!userRequestedStop) startPlatformAsr(onPartial, onFinal, onError, onStopped)
-                        else onStopped()
+                        delay(1000L)  // Increased from 300ms to 1000ms
+                        if (!userRequestedStop) {
+                            Log.d(TAG, "Restarting Platform ASR after error backoff")
+                            startPlatformAsr(onPartial, onFinal, onError, onStopped)
+                        } else {
+                            onStopped()
+                        }
                     }
                 } else {
+                    Log.d(
+                        TAG,
+                        "Not restarting ASR: continuous=$continuousListening, userStop=$userRequestedStop, error=$error"
+                    )
                     onStopped()
                 }
             }
@@ -335,10 +454,15 @@ class VoiceManager(private val context: Context) {
                 } finally {
                     isPlatformListening = false
                     if (continuousListening && !userRequestedStop) {
+                        // Wait longer before restart to avoid rapid cycling
                         scope.launch {
-                            delay(100L)
-                            if (!userRequestedStop) startPlatformAsr(onPartial, onFinal, onError, onStopped)
-                            else onStopped()
+                            delay(500L)  // Increased from 100ms to 500ms
+                            if (!userRequestedStop) {
+                                Log.d(TAG, "Restarting Platform ASR after successful recognition")
+                                startPlatformAsr(onPartial, onFinal, onError, onStopped)
+                            } else {
+                                onStopped()
+                            }
                         }
                     } else {
                         onStopped()

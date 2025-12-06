@@ -29,6 +29,7 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
     val currentModelId by viewModel.currentModelId.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadingModelId by viewModel.downloadingModelId.collectAsState()
+    val downloadedModels by viewModel.downloadedModels.collectAsState()
     val modelStatus by viewModel.modelStatus.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
@@ -271,13 +272,16 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
                     items(availableModels) { model ->
                         val isDownloadingForThisModel = downloadingModelId == model.id
                         val progressForThisModel = if (isDownloadingForThisModel) downloadProgress else null
+                        val isDownloaded = model.isDownloaded || downloadedModels.contains(model.id)
 
                         ModelItem(
                             model = model,
                             isLoaded = model.id == currentModelId,
+                            isDownloaded = isDownloaded,
                             isDownloading = isDownloadingForThisModel,
                             downloadProgress = progressForThisModel,
                             onDownload = { viewModel.downloadModel(model.id) },
+                            onCancelDownload = { viewModel.cancelDownload() },
                             onLoad = { viewModel.loadModel(model.id) }
                         )
                     }
@@ -291,9 +295,11 @@ fun ModelManagementScreen(viewModel: ChatViewModel = viewModel()) {
 fun ModelItem(
     model: ModelInfo,
     isLoaded: Boolean,
+    isDownloaded: Boolean,
     isDownloading: Boolean,
     downloadProgress: Float?, // null when not downloading this model
     onDownload: () -> Unit,
+    onCancelDownload: () -> Unit,
     onLoad: () -> Unit
 ) {
     Card(
@@ -355,56 +361,87 @@ fun ModelItem(
                         Text(
                             "Loaded & Ready",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
                         )
                     }
                 } else {
-                    // Fixed-width Download button so it doesn't stretch the entire row
-                    OutlinedButton(
-                        onClick = onDownload,
-                        enabled = !isDownloading,
-                        modifier = Modifier.width(140.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
+                    // Show download button or cancel button based on state
+                    if (isDownloading) {
+                        // Cancel button when downloading
+                        OutlinedButton(
+                            onClick = onCancelDownload,
+                            modifier = Modifier.width(140.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
                         ) {
-                            if (isDownloading) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 if (downloadProgress != null) {
                                     CircularProgressIndicator(
                                         progress = downloadProgress.coerceIn(0f, 1f),
                                         modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.error
                                     )
                                 } else {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.error
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Downloading")
-                            } else {
-                                Icon(
-                                    Icons.Default.Download,
-                                    contentDescription = "Download",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Download")
+                                Text("Cancel", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    } else {
+                        // Download button - disabled if already downloaded
+                        OutlinedButton(
+                            onClick = onDownload,
+                            enabled = !isDownloaded,
+                            modifier = Modifier.width(140.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (isDownloaded) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = "Downloaded",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Downloaded")
+                                } else {
+                                    Icon(
+                                        Icons.Default.Download,
+                                        contentDescription = "Download",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Download")
+                                }
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.width(12.dp))
 
-                    // Fixed-width Load button with centered content
+                    // Load button - only enabled if downloaded and not currently loading
                     Button(
                         onClick = onLoad,
                         modifier = Modifier.width(100.dp),
-                        enabled = !isDownloading,
+                        enabled = isDownloaded && !isDownloading,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
                     ) {
                         Row(

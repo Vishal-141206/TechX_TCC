@@ -29,6 +29,13 @@
     <string name="ask_about_finances">Ask about your finances…</string>
     <string name="send">Send</string>
     <string name="thinking">Thinking…</string>
+    <string name="clear_chat">Clear Chat</string>
+    <string name="clear_chat_confirmation">Clear Chat History?</string>
+    <string name="clear_chat_message">This will delete all messages in this conversation. This action cannot be undone.</string>
+    <string name="copy_to_clipboard">Copied to clipboard</string>
+    <string name="no_model_loaded">⚠️ No AI Model Loaded</string>
+    <string name="load_model_instruction">Please download and load a model from the Models tab to start chatting.</string>
+    <string name="suggested_questions">Suggested Questions:</string>
 
     <!-- Cash Flow -->
     <string name="cash_flow_summary">Cash Flow Summary</string>

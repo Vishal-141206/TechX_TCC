@@ -102,6 +102,12 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation() {
     val navController = rememberNavController()
     val chatViewModel: ChatViewModel = viewModel()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Show welcome screen EVERY TIME app opens (not using SharedPreferences)
+    var showWelcome by remember {
+        mutableStateOf(true)  // Always starts as true
+    }
 
     // route constants
     val ROUTE_DASH = "dashboard"
@@ -111,7 +117,20 @@ fun AppNavigation() {
     val ROUTE_MODELS = "models"
 
     LaunchedEffect(Unit) {
-        // Voice initialization happens inside ChatScreen / ViewModel when requested.
+        // Load persisted data on app start
+        chatViewModel.loadPersistedData(context)
+        chatViewModel.initializeVoice(context)
+    }
+
+    // Show welcome screen every time app opens
+    if (showWelcome) {
+        WelcomeScreen(
+            onComplete = {
+                showWelcome = false
+                // Don't save to SharedPreferences - will show again on next app open
+            }
+        )
+        return
     }
 
     Scaffold(
@@ -129,7 +148,7 @@ fun AppNavigation() {
         ) {
 
             composable(ROUTE_DASH) {
-                Dashboard(navController = navController, viewModel = chatViewModel)
+                FintechDashboard(navController = navController, viewModel = chatViewModel)
             }
 
             // Plain chat route (no param)
@@ -186,10 +205,10 @@ fun BottomBar(
     routes: List<String>
 ) {
     val items = listOf(
-        NavigationItem(route = routes[0], label = "Dash\nboard", icon = Icons.Default.Home),
+        NavigationItem(route = routes[0], label = "Home", icon = Icons.Default.Home),
         NavigationItem(route = routes[1], label = "AI Chat", icon = Icons.Default.Chat),
         NavigationItem(route = routes[2], label = "SMS\nAnalysis", icon = Icons.Default.Analytics),
-        NavigationItem(route = routes[3], label = "Cash Flow\nSummary", icon = Icons.Default.MonetizationOn),
+        NavigationItem(route = routes[3], label = "Cash Flow", icon = Icons.Default.MonetizationOn),
         NavigationItem(route = routes[4], label = "Models", icon = Icons.Default.Settings)
     )
 
@@ -212,12 +231,22 @@ fun BottomBar(
                         textAlign = TextAlign.Center
                     )
                 },
-                selected = currentRoute == item.route,
+                selected = currentRoute?.startsWith(item.route) == true,
                 onClick = {
-                    if (currentRoute != item.route) {
+                    // Navigate to the selected route
+                    if (item.route == routes[0]) {
+                        // HOME button - always clear back stack and go to dashboard fresh
                         navController.navigate(item.route) {
+                            popUpTo(0) { inclusive = true }
                             launchSingleTop = true
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        }
+                    } else {
+                        // Other tabs - normal navigation
+                        navController.navigate(item.route) {
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
                             restoreState = true
                         }
                     }
