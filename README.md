@@ -712,7 +712,7 @@ User can edit JSON or continue parsing more SMS
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/Vishal-141206/TechX.git
+git clone https://github.com/Vishal-141206/TechX_TCC.git
 cd TechX
 ```
 
