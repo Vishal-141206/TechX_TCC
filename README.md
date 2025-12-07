@@ -28,7 +28,6 @@ ever sending your data to the cloud.
 - [Privacy & Security](#-privacy--security)
 - [Requirements](#-requirements)
 - [Troubleshooting](#-troubleshooting)
-- [License](#-license)
 
 ---
 
@@ -713,8 +712,8 @@ User can edit JSON or continue parsing more SMS
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/privacy-finance-manager.git
-cd privacy-finance-manager
+git clone https://github.com/Vishal-141206/TechX.git
+cd TechX
 ```
 
 ### Step 2: Open in Android Studio
@@ -1427,19 +1426,10 @@ Users have full control over their data:
 
 ### Supported Devices
 
-✅ **Tested On**:
-
-- Google Pixel 6/7/8
-- Samsung Galaxy S21/S22/S23
-- OnePlus 9/10/11
-- Xiaomi Redmi Note 10+
-
-✅ **Should Work On**:
-
 - Any ARM64 Android device (99% of modern phones)
 - Tablets with SMS capability (cellular models)
 
-❌ **Not Supported**:
+**Not Supported**:
 
 - x86 emulators (use ARM64 system images)
 - Android 6.0 and below
@@ -1582,43 +1572,6 @@ Users have full control over their data:
   adb logcat | grep "AndroidRuntime"
   ```
 
-### Debugging Tips
-
-#### **Enable Verbose Logging**
-
-Add to `MyApplication.kt`:
-
-```kotlin
-override fun onCreate() {
-    super.onCreate()
-    if (BuildConfig.DEBUG) {
-        Log.d("MyApplication", "Debug logging enabled")
-    }
-    initializeSDK()
-}
-```
-
-#### **Check SDK Initialization**
-
-```bash
-adb logcat | grep "RunAnywhere"
-# Look for:
-# "RunAnywhere SDK initialized successfully"
-# "LlamaCpp service provider registered"
-```
-
-#### **Monitor Memory Usage**
-
-```bash
-adb shell dumpsys meminfo com.runanywhere.startup_hackathon20
-```
-
-#### **Inspect Downloaded Models**
-
-```bash
-adb shell ls -lh /data/data/com.runanywhere.startup_hackathon20/files/models/
-```
-
 ### Performance Benchmarks
 
 **Expected Inference Speed** (tokens/second):
@@ -1638,26 +1591,6 @@ adb shell ls -lh /data/data/com.runanywhere.startup_hackathon20/files/models/
 
 - Less than 1 second (no AI inference, pure calculation)
 
-### Getting Help
-
-If issues persist:
-
-1. **Check Documentation**: Review relevant `.md` files
-2. **Search Issues**: GitHub Issues (if open-sourced)
-3. **Logcat Output**: Include full crash logs
-4. **Device Info**: Android version, device model, RAM
-5. **Steps to Reproduce**: Detailed reproduction steps
-
----
-
-## 📄 License
-
-This project is built using the **RunAnywhere SDK** and follows its licensing terms.
-
-**App Code**: MIT License (or specify your license)  
-**RunAnywhere SDK**: See [SDK License](https://github.com/RunanywhereAI/runanywhere-sdks)  
-**Models**: Qwen and Llama models have respective licenses from HuggingFace
-
 ---
 
 ## 🌟 Acknowledgments
@@ -1670,24 +1603,6 @@ This project is built using the **RunAnywhere SDK** and follows its licensing te
 
 ---
 
-## 📧 Contact
-
-- **Developer**: [Your Name]
-- **Email**: [your.email@example.com]
-- **GitHub**: [github.com/yourusername](https://github.com/yourusername)
-- **LinkedIn**: [linkedin.com/in/yourprofile](https://linkedin.com/in/yourprofile)
-
----
-
-## 🎉 Project Status
-
-**Current Version**: 1.0.0  
-**Status**: ✅ Production Ready  
-**Last Updated**: January 2025  
-**Build Status**: ![Build Passing](https://img.shields.io/badge/build-passing-brightgreen)
-
----
-
 <div align="center">
 
 ### 🔒 Your Money. Your Data. Your Device.
@@ -1695,8 +1610,7 @@ This project is built using the **RunAnywhere SDK** and follows its licensing te
 **Privacy-First Personal Finance Manager**  
 *Powered by RunAnywhere SDK*
 
-[![Download](https://img.shields.io/badge/Download-APK-blue)]()
-[![Documentation](https://img.shields.io/badge/Docs-Complete-green)]()
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black)](https://github.com/Vishal-141206/TechX)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25-brightgreen)]()
 
 </div>
