@@ -26,10 +26,8 @@ ever sending your data to the cloud.
 - [User Guide](#-user-guide)
 - [Technical Implementation](#-technical-implementation)
 - [Privacy & Security](#-privacy--security)
-- [Demo & Documentation](#-demo--documentation)
 - [Requirements](#-requirements)
 - [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
 - [License](#-license)
 
 ---
@@ -1408,71 +1406,6 @@ Users have full control over their data:
 
 ---
 
-## 📚 Demo & Documentation
-
-### Demo Video Script
-
-A comprehensive **4-minute demo video script** is available:
-
-📄 **[DEMO_VIDEO_SCRIPT.md](DEMO_VIDEO_SCRIPT.md)**
-
-**Includes**:
-
-- Scene-by-scene breakdown (10 scenes)
-- Word-for-word narration
-- Visual directions and timing
-- Technical filming notes
-- 90-second social media version
-- Post-production checklist
-
-**Key Demo Moments**:
-
-1. **Hook** (0:00-0:20): "AI that predicts finances without stealing data"
-2. **AI Parsing** (1:00-1:30): Live transaction extraction
-3. **Scam Detection** (1:30-1:50): Phishing message flagged
-4. **Cash Flow Prediction** (1:50-2:40): Full forecast with insights
-5. **Privacy Proof** (3:00-3:30): Works in Airplane Mode 🔥
-
-### Additional Documentation
-
-#### **For Users**
-
-- 📘 **[HOW_TO_USE_CASH_FLOW.md](HOW_TO_USE_CASH_FLOW.md)**: Step-by-step user guide
-- 🎨 **[VISUAL_GUIDE_CASHFLOW.md](VISUAL_GUIDE_CASHFLOW.md)**: UI flow diagrams
-- ⚡ **[CASHFLOW_QUICK_REFERENCE.md](CASHFLOW_QUICK_REFERENCE.md)**: Quick lookup guide
-
-#### **For Developers**
-
-- 🔧 **[DEVELOPER_GUIDE_CASHFLOW.md](DEVELOPER_GUIDE_CASHFLOW.md)**: Technical implementation details
-- 📊 **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)**: Architecture overview
-- 📋 **[CASH_FLOW_PREDICTION_FEATURE.md](CASH_FLOW_PREDICTION_FEATURE.md)**: Feature specification
-
-#### **For QA**
-
-- 🧪 **[TESTING_CHECKLIST.md](TESTING_CHECKLIST.md)**: 140 test cases
-- ✅ **[PRODUCTION_READY_CHECKLIST.md](PRODUCTION_READY_CHECKLIST.md)**: Launch checklist
-
-#### **Master Index**
-
-- 📑 **[CASHFLOW_INDEX.md](CASHFLOW_INDEX.md)**: Navigate all documentation
-
-### Quick Start for Hackathon Judges
-
-**3-Minute Evaluation Flow**:
-
-1. **Install APK** → Open app → Grant SMS permission
-2. **Download Model** → "Models" → "Qwen 2.5" → "Download" → "Load"
-3. **Import SMS** → "Import SMS" → See ~45 messages found
-4. **Parse Transactions** → Tap "Parse" on 3-5 messages → Watch AI extraction
-5. **Detect Scam** → Tap "Scam" on suspicious message → See fraud analysis
-6. **Predict Cash Flow** → "💰 Predict Cash Flow" → View forecast dialog
-7. **Voice Summary** → Tap speaker icon → Hear TTS summary
-8. **Privacy Test** 🔥 → Enable Airplane Mode → Repeat steps 3-7 → Still works!
-
-**Result**: Verified 100% on-device AI with real financial intelligence.
-
----
-
 ## 📋 Requirements
 
 ### Hardware Requirements
@@ -1717,62 +1650,6 @@ If issues persist:
 
 ---
 
-## 🤝 Contributing
-
-We welcome contributions! Here's how you can help:
-
-### Areas for Contribution
-
-1. **Model Support**: Add more GGUF models (Mistral, Phi, etc.)
-2. **Language Support**: Multi-language SMS parsing (Hindi, Tamil, etc.)
-3. **UI/UX**: Improve design, add animations, dark mode enhancements
-4. **Testing**: Write unit tests, integration tests, UI tests
-5. **Documentation**: Improve guides, add translations
-6. **Performance**: Optimize inference speed, reduce memory usage
-7. **Features**: Export to CSV, budget alerts, goal tracking
-
-### Development Setup
-
-```bash
-# Clone repository
-git clone https://github.com/yourusername/privacy-finance-manager.git
-cd privacy-finance-manager
-
-# Open in Android Studio
-# File → Open → Select project directory
-
-# Create feature branch
-git checkout -b feature/your-feature-name
-
-# Make changes and test
-./gradlew test
-./gradlew connectedAndroidTest
-
-# Commit and push
-git add .
-git commit -m "feat: Add your feature"
-git push origin feature/your-feature-name
-
-# Create Pull Request on GitHub
-```
-
-### Code Style
-
-- **Language**: Kotlin 1.9+
-- **Style Guide**: [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html)
-- **Formatting**: Use Android Studio default formatter
-- **Comments**: KDoc for public APIs
-
-### Pull Request Guidelines
-
-- ✅ Clear description of changes
-- ✅ Reference issue number (if applicable)
-- ✅ All tests passing
-- ✅ No linter warnings
-- ✅ Updated documentation (if needed)
-
----
-
 ## 📄 License
 
 This project is built using the **RunAnywhere SDK** and follows its licensing terms.
@@ -1808,20 +1685,6 @@ This project is built using the **RunAnywhere SDK** and follows its licensing te
 **Status**: ✅ Production Ready  
 **Last Updated**: January 2025  
 **Build Status**: ![Build Passing](https://img.shields.io/badge/build-passing-brightgreen)
-
-### What's Next?
-
-**Planned Features**:
-
-- [ ] Export transactions to CSV/PDF
-- [ ] Budget alerts and notifications
-- [ ] Savings goal tracking
-- [ ] Multi-language support (Hindi, Tamil, Bengali)
-- [ ] Expense charts and graphs
-- [ ] Whisper integration for voice input
-- [ ] Bank account aggregation (with user consent)
-
-**Want to contribute?** See [Contributing](#-contributing) section above!
 
 ---
 
