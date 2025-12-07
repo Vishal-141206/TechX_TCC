@@ -131,7 +131,7 @@ increasing/stable/decreasing)
 ### 5. **On-Device AI** 🤖
 
 - **Model Management**: Download and load AI models directly in the app
-- **Multiple Model Support**: Choose from Qwen 2.5, Llama 3.2, or SmolLM2
+- **Multiple Model Support**: Choose from Qwen 2.5 or Llama 3.2
 - **Streaming Responses**: See AI responses generate word-by-word
 - **Optimized Inference**: Runs efficiently on mobile hardware with quantized models
 
@@ -1553,10 +1553,7 @@ A comprehensive **4-minute demo video script** is available:
 
 - Try smaller model (Qwen 2.5 0.5B instead of Llama 3.2 1B)
 - Close other apps to free memory
-- Verify `largeHeap="true"` in `AndroidManifest.xml`:
-  ```xml
-  <application android:largeHeap="true" ...>
-  ```
+- Verify `largeHeap="true"` is set in `AndroidManifest.xml` (in the application tag)
 - Check available RAM: Settings → Apps → Privacy Finance Manager → Storage
 - Restart device to clear memory
 
