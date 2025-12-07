@@ -195,8 +195,7 @@ This app leverages state-of-the-art large language models optimized for on-devic
 
 ### Primary Model: **Qwen 2.5 0.5B Instruct**
 
-**Source
-**: [Triangle104/Qwen2.5-0.5B-Instruct-Q6_K-GGUF](https://huggingface.co/Triangle104/Qwen2.5-0.5B-Instruct-Q6_K-GGUF)
+**Source**: [Triangle104/Qwen2.5-0.5B-Instruct-Q6_K-GGUF](https://huggingface.co/Triangle104/Qwen2.5-0.5B-Instruct-Q6_K-GGUF)
 
 **Specifications**:
 
@@ -220,8 +219,7 @@ This app leverages state-of-the-art large language models optimized for on-devic
 
 ### Alternative Model: **Llama 3.2 1B Instruct**
 
-**Source
-**: [bartowski/Llama-3.2-1B-Instruct-GGUF](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF)
+**Source**: [bartowski/Llama-3.2-1B-Instruct-GGUF](https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF)
 
 **Specifications**:
 
@@ -878,7 +876,7 @@ Or use Android Studio's "Run" button to install and launch automatically.
 
 - **High (30+ transactions)**: Very reliable predictions
 - **Medium (15-29 transactions)**: Good estimates with some uncertainty
-- **Low (<15 transactions)**: Basic forecast, parse more messages
+- **Low (fewer than 15 transactions)**: Basic forecast, parse more messages
 
 **Example Insights**:
 
@@ -1014,12 +1012,12 @@ suspend fun parseSelectedSms(smsId: String) {
     
     Required JSON format:
     {
-      "amount": <number>,
-      "merchant": "<string>",
+      "amount": NUMBER,
+      "merchant": "STRING",
       "type": "debit" or "credit",
       "date": "YYYY-MM-DD",
-      "category": "<string>",
-      "balance": <number>
+      "category": "STRING",
+      "balance": NUMBER
     }
     
     Rules:
@@ -1708,7 +1706,7 @@ adb shell ls -lh /data/data/com.runanywhere.startup_hackathon20/files/models/
 
 **Cash Flow Prediction**:
 
-- < 1 second (no AI inference, pure calculation)
+- Less than 1 second (no AI inference, pure calculation)
 
 ### Getting Help
 
