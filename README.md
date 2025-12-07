@@ -1608,9 +1608,8 @@ Users have full control over their data:
 ### 🔒 Your Money. Your Data. Your Device.
 
 **Privacy-First Personal Finance Manager**  
-*Powered by RunAnywhere SDK*
 
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-black)](https://github.com/Vishal-141206/TechX)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-black)](https://github.com/Vishal-141206/TechX_TCC)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25-brightgreen)]()
 
 </div>
